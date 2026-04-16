@@ -1,0 +1,15 @@
+{
+    "ListenAddress": "127.0.0.1", //应用程序监听配置的IP，无需更改
+    "ListenPort": 1521, //应用程序监听端口，无需更改
+    "DebugLogPath": "logs/debug.log", //debug文件路径
+    "DebugEnabled": true, //debug启用开关
+    "LogFilePath": "logs/sql_audit.log", //本地日志文件路径
+    "FlushIntervalMinutes": 10, //10分钟后无动作开始上传本地日志
+    "AuditDb": {
+        "Host": "192.168.1.1", //实际数据库的IP
+        "Port": 1521, //实际数据库监听端口
+        "ServiceName": "your_db_servicename", //实际数据库的servicename
+        "Username": "your_db_user", //登录名
+        "Password": "your_password" //密码
+    }
+}
