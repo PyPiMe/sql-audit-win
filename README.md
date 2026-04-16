@@ -3,6 +3,7 @@
 功能简介：在windows环境下，监控应用程序（如PL/SQL Developer），使用Oracle数据库，发出的SQL语句。并记录在数据库中。无需Oracle启用审计。
 
 # 功能架构
+```
 ┌─────────────────┐    ┌─────────────┐    ┌────────────────────────────┐
 │ PL/SQL Developer│────▶│ SQL代理     │────▶│ Oralce 11g数据库服务器 │
 └─────────────────┘    └─────────────┘    └────────────────────────────┘
@@ -11,24 +12,29 @@
                         │ 日志服务    │
                         │ 记录SQL     │
                         └────────────┘
+```
 # 使用方法
 1. 下载源码，自行build。
-    ```
+    ```cmd
         dotnet restore
         dotnet publish -c Release
     ```
 2. 按照config.json配置进行配置。
 3. 添加服务。
 - 下载 NSSM
-    下载地址：https://nssm.cc/download
-    选择 nssm-2.24-101-g897c7ad.zip
-    解压到 C:\Tools\nssm或任意目录
+    - 下载地址：https://nssm.cc/download
+    - 选择 nssm-2.24-101-g897c7ad.zip
+    - 解压到 C:\Tools\nssm或任意目录
 - 使用 NSSM 安装服务
+    ```cmd
     C:\Tools\nssm\win64\nssm.exe install SqlProxy
+    ```
     然后在弹出的窗口中设置：
+    ```
     Path: C:\Tools\SqlProxy\SqlProxy.exe
     Startup directory: C:\Tools\SqlProxy
     Arguments: --service
+    ```
 - 启动服务
     net start SqlProxy
 4. 应用程序的TNSNAME.ORA配置类似下面结构。注意SERVICE_NAME和config.json配置中的ServiceName保持一致。
@@ -42,7 +48,7 @@
         )
     ```
 5. config.json说明
-    ```
+    ```json
     {
         "ListenAddress": "127.0.0.1", //应用程序监听配置的IP，无需更改
         "ListenPort": 1521, //应用程序监听端口，无需更改
@@ -75,7 +81,7 @@
     ```
 - 即上面的连接字符串指向SQL代理程序。此时PL/SQL Developer输入的帐号密码，不作为连接实际数据库的帐号信息，可以随意填写。
 - SQL代理程序截获这个请求，并用config.json配置文件中的配置连接数据库。
-    ```
+    ```json
     "AuditDb": {
         "Host": "192.168.4.1",
         "Port": 1522,
@@ -102,7 +108,7 @@
 4. 现在本地生成文件日志，当监测应用程序10分钟（可以在配置文件中调整）无任何动作后，将日志上传到数据库；
 - 数据库为Oracle
 - 数据库表已存在，表名 han_sql_audit_log ，表结构如下
-    ```
+    ```sql
         CREATE TABLE han_sql_audit_log (
             wid VARCHAR2(40) not null,
             timestamp VARCHAR2(40),
