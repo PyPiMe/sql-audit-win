@@ -45,7 +45,7 @@ public class DebugLogService
         if (!_enabled) return;
 
         var actualLength = Math.Min(length, data.Length);
-        var hex = BitConverter.ToString(data.Take(actualLength).ToArray()).Replace("-", " ");
+        var hex = BitConverter.ToString(data, 0, actualLength).Replace("-", " ");
         Log($"{prefix}: {hex}");
     }
 }

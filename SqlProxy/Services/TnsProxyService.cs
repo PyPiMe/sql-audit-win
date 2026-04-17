@@ -112,6 +112,12 @@ public class TnsProxyService
         _debugLog.Log($"[SESSION:{sessionId}] ========== New Session ==========");
 
         TcpClient? backend = null;
+        NetworkStream? backendStream = null;
+        NetworkStream? clientStream = null;
+        byte[]? clientConnectPacket = null;
+        byte[]? finalResponseToClient = null;
+        int finalResponseLength = 0;
+
         try
         {
             if (_config.AuditDb == null || string.IsNullOrEmpty(_config.AuditDb.Host))
@@ -142,8 +148,116 @@ public class TnsProxyService
             };
             _sessions[sessionId] = session;
 
-            var clientStream = client.GetStream();
-            var backendStream = backend.GetStream();
+            clientStream = client.GetStream();
+            backendStream = backend.GetStream();
+
+            _debugLog.Log($"[SESSION:{sessionId}] Starting to read client data...");
+
+            var buffer = new byte[32768];
+            var bytesRead = await clientStream.ReadAsync(buffer, ct);
+            if (bytesRead == 0)
+            {
+                _debugLog.Log($"[SESSION:{sessionId}] Client closed before sending data");
+                return;
+            }
+
+            clientConnectPacket = buffer.Take(bytesRead).ToArray();
+
+            _debugLog.LogHex($"[SESSION:{sessionId}] C->B[1]", clientConnectPacket, Math.Min(bytesRead, 256));
+
+            await backendStream.WriteAsync(clientConnectPacket, ct);
+            await backendStream.FlushAsync(ct);
+
+            _debugLog.Log($"[SESSION:{sessionId}] Waiting for backend response...");
+
+            var responseBuffer = new byte[32768];
+            var responseBytes = await backendStream.ReadAsync(responseBuffer, ct);
+            if (responseBytes == 0)
+            {
+                _debugLog.Log($"[SESSION:{sessionId}] Backend closed without response");
+                return;
+            }
+
+            _debugLog.LogHex($"[SESSION:{sessionId}] B->C[1]", responseBuffer, Math.Min(responseBytes, 256));
+
+            RedirectInfo? redirectInfo = null;
+
+            var fullText = TnsPacketHelper.ExtractAllAsciiText(responseBuffer, responseBytes);
+            _debugLog.Log($"[SESSION:{sessionId}] Full response text: {fullText.Substring(0, Math.Min(100, fullText.Length))}...");
+
+            var redirect = TnsPacketHelper.FindRedirectInTnsData(responseBuffer, responseBytes);
+            if (redirect != null)
+            {
+                redirectInfo = redirect;
+                _debugLog.Log($"[SESSION:{sessionId}] REDIRECT found: {redirectInfo.Host}:{redirectInfo.Port}");
+            }
+            else
+            {
+                _debugLog.Log($"[SESSION:{sessionId}] No redirect found in response");
+            }
+
+            if (redirectInfo != null)
+            {
+                _debugLog.Log($"[SESSION:{sessionId}] Redirecting to real node: {redirectInfo.Host}:{redirectInfo.Port}");
+
+                backend.Close();
+                backend = null;
+                backendStream = null;
+
+                backend = new TcpClient();
+                backend.NoDelay = true;
+
+                using (var connectCts = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+                {
+                    await backend.ConnectAsync(redirectInfo.Host, redirectInfo.Port, connectCts.Token);
+                }
+
+                _debugLog.Log($"[SESSION:{sessionId}] Connected to real node: {redirectInfo.Host}:{redirectInfo.Port}");
+
+                backendStream = backend.GetStream();
+
+                await backendStream.WriteAsync(clientConnectPacket, ct);
+                await backendStream.FlushAsync(ct);
+
+                responseBytes = await backendStream.ReadAsync(responseBuffer, ct);
+                if (responseBytes == 0)
+                {
+                    _debugLog.Log($"[SESSION:{sessionId}] Real node closed without response");
+                    return;
+                }
+
+                _debugLog.LogHex($"[SESSION:{sessionId}] B->C[2]", responseBuffer, Math.Min(responseBytes, 256));
+
+                var hasRedirect2 = TnsPacketHelper.FindRedirectInTnsData(responseBuffer, responseBytes) != null;
+                if (hasRedirect2)
+                {
+                    _debugLog.Log($"[SESSION:{sessionId}] Another REDIRECT received, giving up");
+                    return;
+                }
+
+                var firstPacketType = TnsPacketHelper.GetPacketType(responseBuffer, responseBytes);
+                if (firstPacketType != TnsPacketHelper.TNS_TYPE_ACCEPT && 
+                    firstPacketType != TnsPacketHelper.TNS_TYPE_DATA &&
+                    firstPacketType != TnsPacketHelper.TNS_TYPE_RESEND &&
+                    firstPacketType != TnsPacketHelper.TNS_TYPE_MARKER)
+                {
+                    _debugLog.Log($"[SESSION:{sessionId}] Unexpected packet type: {firstPacketType}");
+                    return;
+                }
+
+                _debugLog.Log($"[SESSION:{sessionId}] Got response from real node, starting relay (type={firstPacketType})");
+
+                finalResponseToClient = responseBuffer;
+                finalResponseLength = responseBytes;
+            }
+            else
+            {
+                finalResponseToClient = responseBuffer;
+                finalResponseLength = responseBytes;
+            }
+
+            await clientStream.WriteAsync(finalResponseToClient.AsMemory(0, finalResponseLength), ct);
+            await clientStream.FlushAsync(ct);
 
             var clientToBackend = ProxyDataAsync(clientStream, backendStream, true, endPoint, sessionId, session, ct);
             var backendToClient = ProxyDataAsync(backendStream, clientStream, false, endPoint, sessionId, session, ct);
@@ -165,6 +279,35 @@ public class TnsProxyService
             backend?.Close();
             _debugLog.Log($"[SESSION:{sessionId}] ========== Session Closed ==========");
         }
+    }
+
+    private (bool hasRedirect, RedirectInfo? info) FindRedirectInBuffer(byte[] buffer, int length)
+    {
+        int offset = 0;
+        while (offset + 2 <= length)
+        {
+            int pktLen = (buffer[offset] << 8) | buffer[offset + 1];
+            if (pktLen < 8 || offset + pktLen > length)
+            {
+                break;
+            }
+
+            byte pktType = buffer[offset + 4];
+
+            if (pktType == TnsPacketHelper.TNS_TYPE_REDIRECT)
+            {
+                var info = TnsPacketHelper.ParseRedirect(buffer, offset, pktLen);
+                if (info != null)
+                {
+                    return (true, info);
+                }
+            }
+
+            offset += pktLen;
+            if (pktLen == 0) break;
+        }
+
+        return (false, null);
     }
 
     private async Task ProxyDataAsync(NetworkStream src, NetworkStream dst, bool fromClient, string endPoint, string sessionId, ClientSession session, CancellationToken ct)

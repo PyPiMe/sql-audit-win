@@ -4,15 +4,27 @@
 
 # 功能架构
 ```
-┌─────────────────┐    ┌─────────────┐    ┌────────────────────────────┐
-│ PL/SQL Developer│────▶│ SQL代理     │────▶│ Oralce 11g数据库服务器 │
-└─────────────────┘    └─────────────┘    └────────────────────────────┘
+┌─────────────────┐    ┌─────────────┐    ┌────────────────────┐
+│ PL/SQL Developer│────▶│ SQL代理     │────▶│ Oralce 数据库服务器 │
+└─────────────────┘    └─────────────┘    └────────────────────┘
                               │
                         ┌─────▼──────┐
                         │ 日志服务    │
-                        │ 记录SQL     │
+                        │ 记录SQL    │
+                        │ 空闲上传    │
                         └────────────┘
 ```
+
+# 开发环境
+- C#，SDK为 dotnet-sdk-10.0.201
+- Oracle数据库
+- IDE为Open Code
+- 本地git
+
+# 调试环境
+- KVM下windows虚机进行调试
+- windows虚机版本 Windows 10 Enterprise LTSC 2021
+
 # 使用方法
 1. 下载源码，自行build。
     ```cmd
@@ -20,34 +32,6 @@
         dotnet publish -c Release
     ```
 2. 按照config.json配置进行配置。
-3. 添加服务。
-- 下载 NSSM
-    - 下载地址：https://nssm.cc/download
-    - 选择 nssm-2.24-101-g897c7ad.zip
-    - 解压到 C:\Tools\nssm或任意目录
-- 使用 NSSM 安装服务
-    ```cmd
-    C:\Tools\nssm\win64\nssm.exe install SqlProxy
-    ```
-    然后在弹出的窗口中设置：
-    ```
-    Path: C:\Tools\SqlProxy\SqlProxy.exe
-    Startup directory: C:\Tools\SqlProxy
-    Arguments: --service
-    ```
-- 启动服务
-    net start SqlProxy
-4. 应用程序的TNSNAME.ORA配置类似下面结构。注意SERVICE_NAME和config.json配置中的ServiceName保持一致。
-    ```
-        (DESCRIPTION =
-            (ADDRESS = (PROTOCOL = TCP)(HOST = 127.0.0.1)(PORT = 1521))
-        (CONNECT_DATA =
-            (SERVER = DEDICATED)
-            (SERVICE_NAME = han)
-            )
-        )
-    ```
-5. config.json说明
     ```json
     {
         "ListenAddress": "127.0.0.1", //应用程序监听配置的IP，无需更改
@@ -65,8 +49,38 @@
         }
     }
     ```
-# 使用 Open Code 开发
-## 提示词
+3. 添加服务。
+- 下载 NSSM
+    - 下载地址：https://nssm.cc/download
+    - 选择 nssm-2.24-101-g897c7ad.zip
+    - 解压到 C:\Tools\nssm或任意目录
+- 使用 NSSM 安装服务
+    ```cmd
+    C:\Tools\nssm\win64\nssm.exe install SqlProxy
+    ```
+    然后在弹出的窗口中设置：
+    ```
+    Path: C:\Tools\SqlProxy\SqlProxy.exe
+    Startup directory: C:\Tools\SqlProxy
+    Arguments: --service
+    ```
+- 启动服务
+    ```
+    -- 默认目录 C:\Tools\nssm\win64
+    net start SqlProxy
+    ```
+4. 应用程序的TNSNAME.ORA配置类似下面结构。注意SERVICE_NAME和config.json配置中的ServiceName保持一致。
+    ```
+        (DESCRIPTION =
+            (ADDRESS = (PROTOCOL = TCP)(HOST = 127.0.0.1)(PORT = 1521))
+        (CONNECT_DATA =
+            (SERVER = DEDICATED)
+            (SERVICE_NAME = han)
+            )
+        )
+    ```
+
+# 提示词
 1. 使用C#编写SQL代理程序，该程序使用类似透明代理的方式，记录应用程序发出的SQL文本并记录，需要尽可能提取完整的SQL文本。
 2. 程序实际流程如下图所示。步骤如下：
 - 应用程序PL/SQL Developer使用下面的字符串连接，这个字符串配置在TNSNAME.ORA中，不在config.json配置文件中。
@@ -96,7 +110,7 @@
             (ADDRESS = (PROTOCOL = TCP)(HOST = 192.168.4.1)(PORT = 1522))
             (CONNECT_DATA =
                 (SERVER = DEDICATED)
-                (SERVICE_NAME = urpjw)
+                (SERVICE_NAME = servicetestname)
             )
         )
     ```
@@ -136,9 +150,8 @@
 - username 字段，为config.json配置文件中"Username"的值
 - client_host 字段，为SQL代理程序获取程序运行的主机的主机名
 - client_user 字段，为SQL代理程序获取程序运行的主机的用户名（windows登录用户）
-- 本地文件日志，也需要按照表中要求字段记录
+- 本地文件日志，也需要按照表中要求字段记录。
 5. 每次完成上传后，删除本地文件日志内容，避免数据重复。
-6. 程序提供windows服务模式启动，参数“--service”
-## 调试
-- KVM下windows虚机进行调试
-- SDK为 dotnet-sdk-10.0.201-win-x64.exe
+6. 程序提供windows服务模式启动，参数“--service”。
+7. 处理TNS重定向问题，即兼容实际数据库连接的IP是Oralce的Scan IP问题。
+
