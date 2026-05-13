@@ -1,157 +1,217 @@
 # sql-audit-win
 
-功能简介：在windows环境下，监控应用程序（如PL/SQL Developer），使用Oracle数据库，发出的SQL语句。并记录在数据库中。无需Oracle启用审计。
+> **SQL Audit Proxy for Oracle on Windows** — Transparently intercepts SQL statements from Oracle client applications (e.g. PL/SQL Developer), records them locally and uploads to an audit table. No Oracle built-in auditing required.
+>
+> **Windows 环境下的 Oracle SQL 审计代理** — 透明拦截 Oracle 客户端（如 PL/SQL Developer）发出的 SQL 语句，记录到本地文件并上传审计表，无需 Oracle 启用审计。
 
-# 功能架构
+---
+
+## Architecture / 功能架构
+
 ```
-┌─────────────────┐    ┌─────────────┐    ┌────────────────────┐
-│ PL/SQL Developer│────▶│ SQL代理     │────▶│ Oralce 数据库服务器 │
-└─────────────────┘    └─────────────┘    └────────────────────┘
-                              │
-                        ┌─────▼──────┐
-                        │ 日志服务    │
-                        │ 记录SQL    │
-                        │ 空闲上传    │
-                        └────────────┘
+┌─────────────────┐     ┌──────────────┐     ┌──────────────────────┐
+│ PL/SQL Developer│────▶│  SQL Proxy   │────▶│  Oracle Database     │
+│  (Oracle Client)│     │  (MITM Agent)│     │  Server              │
+└─────────────────┘     └──────────────┘     └──────────────────────┘
+                               │
+                         ┌─────▼──────┐
+                         │ Log Service │
+                         │ (File + DB) │
+                         └────────────┘
 ```
 
-# 开发环境
-- C#，SDK为 dotnet-sdk-10.0.201
-- Oracle数据库
-- IDE为Open Code
-- 本地git
+---
 
-# 调试环境
-- KVM下windows虚机进行调试
-- windows虚机版本 Windows 10 Enterprise LTSC 2021
+## Features / 功能特性
 
-# 使用方法
-1. 下载源码，自行build。
-    ```cmd
-        dotnet restore
-        dotnet publish -c Release
-    ```
-2. 按照config.json配置进行配置。
-    ```json
-    {
-        "ListenAddress": "127.0.0.1", //应用程序监听配置的IP，无需更改
-        "ListenPort": 1521, //应用程序监听端口，无需更改
-        "DebugLogPath": "logs/debug.log", //debug文件路径
-        "DebugEnabled": true, //debug启用开关
-        "LogFilePath": "logs/sql_audit.log", //本地日志文件路径
-        "FlushIntervalMinutes": 10, //10分钟后无动作开始上传本地日志
-        "AuditDb": {
-            "Host": "192.168.1.1", //实际数据库的IP
-            "Port": 1521, //实际数据库监听端口
-            "ServiceName": "your_db_servicename", //实际数据库的servicename
-            "Username": "your_db_user", //登录名
-            "Password": "your_password" //密码
-        }
-    }
-    ```
-3. 添加服务。
-- 下载 NSSM
-    - 下载地址：https://nssm.cc/download
-    - 选择 nssm-2.24-101-g897c7ad.zip
-    - 解压到 C:\Tools\nssm或任意目录
-- 使用 NSSM 安装服务
-    ```cmd
-    C:\Tools\nssm\win64\nssm.exe install SqlProxy
-    ```
-    然后在弹出的窗口中设置：
-    ```
-    Path: C:\Tools\SqlProxy\SqlProxy.exe
-    Startup directory: C:\Tools\SqlProxy
-    Arguments: --service
-    ```
-- 启动服务
-    ```
-    -- 默认目录 C:\Tools\nssm\win64
-    net start SqlProxy
-    ```
-4. 应用程序的TNSNAME.ORA配置类似下面结构。注意SERVICE_NAME和config.json配置中的ServiceName保持一致。
-    ```
-        (DESCRIPTION =
-            (ADDRESS = (PROTOCOL = TCP)(HOST = 127.0.0.1)(PORT = 1521))
-        (CONNECT_DATA =
-            (SERVER = DEDICATED)
-            (SERVICE_NAME = han)
-            )
-        )
-    ```
+| Feature / 功能 | Description / 描述 |
+|---|---|
+| **SQL Capture / SQL 捕获** | Extracts full SQL text (SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, EXEC, CALL) from TNS protocol stream |
+| **Login User Extraction / 登录用户提取** | Parses TNS OAUTH packets to capture the actual PL/SQL Developer login username (stored in `username` field) |
+| **Windows User Detection / Windows 用户识别** | Uses WTS API + explorer.exe token fallback to get the interactive Windows user even when running as SYSTEM service (stored in `client_user` field) |
+| **Firewall Bypass Prevention / 防火墙绕过拦截** | Auto-creates Windows Firewall outbound rules to block known Oracle clients (plsqldev.exe, sqlplus.exe, etc.) from direct access to Oracle server; periodic re-scan to catch newly started processes |
+| **TNS Redirect Handling / TNS 重定向处理** | Handles Oracle RAC SCAN IP redirects automatically |
+| **Dual Logging / 双重日志** | Local JSON-lines file + automatic upload to Oracle audit table; local file is cleared after upload to avoid duplicates |
+| **Windows Service Support / 服务模式** | Supports `--service` flag for headless operation via NSSM |
 
-# 提示词
-1. 使用C#编写SQL代理程序，该程序使用类似透明代理的方式，记录应用程序发出的SQL文本并记录，需要尽可能提取完整的SQL文本。
-2. 程序实际流程如下图所示。步骤如下：
-- 应用程序PL/SQL Developer使用下面的字符串连接，这个字符串配置在TNSNAME.ORA中，不在config.json配置文件中。
-    ```
-        (DESCRIPTION =
-            (ADDRESS = (PROTOCOL = TCP)(HOST = 127.0.0.1)(PORT = 1521))
-            (CONNECT_DATA =
-                (SERVER = DEDICATED)
-                (SERVICE_NAME = servicetestname)
-            )
-        )
-    ```
-- 即上面的连接字符串指向SQL代理程序。此时PL/SQL Developer输入的帐号密码，不作为连接实际数据库的帐号信息，可以随意填写。
-- SQL代理程序截获这个请求，并用config.json配置文件中的配置连接数据库。
-    ```json
+---
+
+## Table Schema / 数据库表结构
+
+```sql
+CREATE TABLE han_sql_audit_log (
+    wid          VARCHAR2(40)  not null,      -- GUID
+    timestamp    VARCHAR2(40),                 -- capture time (YYYY-MM-DD HH:MM:SS)
+    source_ip    VARCHAR2(100),                -- proxy host real IP
+    username     VARCHAR2(30),                 -- PL/SQL Developer login username (from TNS OAUTH)
+    sql_text     VARCHAR2(4000),               -- captured SQL text
+    client_host  VARCHAR2(100),                -- proxy host machine name
+    client_user  VARCHAR2(50)                  -- interactive Windows login user (via WTS API)
+);
+
+CREATE INDEX idx_audit_time ON han_sql_audit_log(timestamp);
+CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
+CREATE INDEX idx_audit_ip  ON han_sql_audit_log(source_ip);
+
+COMMENT ON COLUMN han_sql_audit_log.wid          IS 'wid / 唯一标识';
+COMMENT ON COLUMN han_sql_audit_log.timestamp    IS 'capture time / 提交时间';
+COMMENT ON COLUMN han_sql_audit_log.source_ip    IS 'proxy IP / 提交IP';
+COMMENT ON COLUMN han_sql_audit_log.username     IS 'PL/SQL Developer login user / 提交用户';
+COMMENT ON COLUMN han_sql_audit_log.sql_text     IS 'SQL text / SQL文本';
+COMMENT ON COLUMN han_sql_audit_log.client_host  IS 'host name / 提交主机名';
+COMMENT ON COLUMN han_sql_audit_log.client_user  IS 'Windows login user / 提交主机用户';
+```
+
+### Field Description / 字段说明
+
+| Field / 字段 | Source / 来源 |
+|---|---|
+| `wid` | Auto-generated GUID by the proxy |
+| `timestamp` | Capture time, format `yyyy-MM-dd HH:mm:ss` |
+| `source_ip` | Real IP of the machine running the proxy (detected via UDP socket) |
+| `username` | **PL/SQL Developer login username** extracted from TNS OAUTH `AUTH_TERMINAL` context; falls back to config's `Username` if TNS parsing fails |
+| `sql_text` | Full SQL statement text |
+| `client_host` | `Environment.MachineName` — the proxy host machine name |
+| `client_user` | **Interactive Windows login user** — queried via `WTSGetActiveConsoleSessionId` + `WTSQuerySessionInformation`, falls back to explorer.exe process owner detection, then `Environment.UserName` |
+
+---
+
+## Configuration / 配置文件 (`config.json`)
+
+```json
+{
+    "ListenAddress": "127.0.0.1",
+    "ListenPort": 1521,
+    "DebugLogPath": "logs/debug.log",
+    "DebugEnabled": true,
+    "LogFilePath": "logs/sql_audit.log",
+    "FlushIntervalMinutes": 10,
+    "PersistFirewallRules": false,
     "AuditDb": {
-        "Host": "192.168.4.1",
-        "Port": 1522,
-        "ServiceName": "servicetestname",
-        "Username": "user",
-        "Password": "userpwd"
-    },
-    ```
-- SQL代理程序使用时，按照配置文件中的信息，按照下面构建标准连接字符串。
-    ```
-        (DESCRIPTION =
-            (ADDRESS = (PROTOCOL = TCP)(HOST = 192.168.4.1)(PORT = 1522))
-            (CONNECT_DATA =
-                (SERVER = DEDICATED)
-                (SERVICE_NAME = servicetestname)
-            )
-        )
-    ```
-- SQL代理程序记录通过应用程序PL/SQL Developer发出的所有SQL文本。SQL关键词包括"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXEC", "CALL" 。
-- SQL代理程序将实际数据库运行结构返回给应用程序PL/SQL Developer供其使用。
-3. 配置文件要求：
-- config.json配置文件中读取日志文件的配置，包括路径和日志文件名。
-- config.json配置文件中设置调试开关参数，并将相关日志输出到一个调试日志的配置，包括路径和日志文件名。若调试开关参数开启，需要完整记录日志。
-4. 现在本地生成文件日志，当监测应用程序10分钟（可以在配置文件中调整）无任何动作后，将日志上传到数据库；
-- 数据库为Oracle
-- 数据库表已存在，表名 han_sql_audit_log ，表结构如下
-    ```sql
-        CREATE TABLE han_sql_audit_log (
-            wid VARCHAR2(40) not null,
-            timestamp VARCHAR2(40),
-            source_ip VARCHAR2(100),
-            username VARCHAR2(30),
-            sql_text VARCHAR2(4000),
-            client_host VARCHAR2(100),
-            client_user VARCHAR2(50)
-        );
-        CREATE INDEX idx_audit_time ON han_sql_audit_log(timestamp);
-        CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
-        CREATE INDEX idx_audit_ip ON han_sql_audit_log(source_ip);
-        -- Add comments to the columns 
-        comment on column HAN_SQL_AUDIT_LOG.wid is 'wid';
-        comment on column HAN_SQL_AUDIT_LOG.timestamp is '提交时间';
-        comment on column HAN_SQL_AUDIT_LOG.source_ip is '提交IP';
-        comment on column HAN_SQL_AUDIT_LOG.username is '提交用户';
-        comment on column HAN_SQL_AUDIT_LOG.sql_text is 'SQL文本';
-        comment on column HAN_SQL_AUDIT_LOG.client_host is '提交主机名';
-        comment on column HAN_SQL_AUDIT_LOG.client_user is '提交主机用户';
-    ```
-- wid 字段由SQL代理程序使用GUID生成
-- timestamp 字段，为SQL代理程序根据捕获的SQL文本的时间生成，格式为YYYY-MM-DD HH:MM:SS
-- source_ip 字段，为SQL代理程序获取程序运行的主机的真实IP
-- username 字段，为config.json配置文件中"Username"的值
-- client_host 字段，为SQL代理程序获取程序运行的主机的主机名
-- client_user 字段，为SQL代理程序获取程序运行的主机的用户名（windows登录用户）
-- 本地文件日志，也需要按照表中要求字段记录。
-5. 每次完成上传后，删除本地文件日志内容，避免数据重复。
-6. 程序提供windows服务模式启动，参数“--service”。
-7. 处理TNS重定向问题，即兼容实际数据库连接的IP是Oralce的Scan IP问题。
+        "Host": "192.168.1.1",
+        "Port": 1521,
+        "ServiceName": "your_db_servicename",
+        "Username": "your_db_user",
+        "Password": "your_password"
+    }
+}
+```
 
+| Parameter / 参数 | Description / 说明 | Notes |
+|---|---|---|
+| `ListenAddress` | Proxy listen IP | Usually `127.0.0.1` |
+| `ListenPort` | Proxy listen port | Usually `1521` (Oracle default) |
+| `DebugLogPath` | Debug log file path | e.g. `logs/debug.log` |
+| `DebugEnabled` | Enable debug logging | `true` or `false` |
+| `LogFilePath` | SQL audit log file path | e.g. `logs/sql_audit.log` |
+| `FlushIntervalMinutes` | Idle time before uploading to DB | Default `10` minutes |
+| `PersistFirewallRules` | Keep firewall rules after proxy stops | `false` (remove on stop), `true` (keep) |
+| `AuditDb.Host` | Real Oracle database IP | e.g. `192.168.1.1` |
+| `AuditDb.Port` | Real Oracle database port | e.g. `1521` |
+| `AuditDb.ServiceName` | Oracle service name | Must match the service name in tnsnames.ora |
+| `AuditDb.Username` | Database account for upload | Used to connect to the audit database |
+| `AuditDb.Password` | Database password | |
+
+Note: `config.json` supports `//` style comments (parsed with `JsonCommentHandling.Skip`).
+
+---
+
+## Setup Guide / 使用指南
+
+### 1. Build / 编译
+
+```cmd
+dotnet restore
+dotnet publish -c Release
+```
+
+### 2. Configure / 配置
+
+Edit `config.json` with your Oracle server details and credentials.
+
+### 3. Install as Windows Service / 安装为服务 (optional)
+
+Download NSSM from [nssm.cc/download](https://nssm.cc/download) (choose `nssm-2.24-101-g897c7ad.zip`), then:
+
+```cmd
+C:\Tools\nssm\win64\nssm.exe install SqlProxy
+```
+
+Set in the NSSM window:
+- **Path:** `C:\Tools\SqlProxy\SqlProxy.exe`
+- **Startup directory:** `C:\Tools\SqlProxy`
+- **Arguments:** `--service`
+
+```cmd
+net start SqlProxy
+```
+
+### 4. Client tnsnames.ora / 客户端配置
+
+Configure your Oracle client (e.g. PL/SQL Developer) to connect to the proxy instead of the real database. The `SERVICE_NAME` must match the `ServiceName` in `config.json`.
+
+```
+(DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = 127.0.0.1)(PORT = 1521))
+    (CONNECT_DATA =
+        (SERVER = DEDICATED)
+        (SERVICE_NAME = han)
+    )
+)
+```
+
+> **Note / 注意:** The username and password entered in PL/SQL Developer's login dialog **will be captured** in the `username` field (extracted from TNS OAUTH). The actual database authentication uses the credentials from `config.json`.
+
+> **Important / 重要:** The proxy automatically blocks known Oracle client processes (plsqldev.exe, sqlplus.exe, etc.) from connecting directly to the database server via Windows Firewall. This prevents bypassing the audit. Set `PersistFirewallRules: true` to keep the block rules after the proxy stops.
+
+---
+
+## How It Works / 工作原理
+
+1. **PL/SQL Developer** connects to `127.0.0.1:1521` (the proxy) via tnsnames.ora
+2. **SQL Proxy** accepts the connection, connects to the real Oracle database using config credentials
+3. **TNS Handshake** is relayed transparently; RAC SCAN redirects are handled automatically
+4. **Login User Extraction**: The proxy parses the TNS OAUTH authentication packet, extracts the DB username (the value preceding `AUTH_TERMINAL`), and records it in the `username` field
+5. **SQL Capture**: Every client-to-backend data packet is scanned for SQL keywords; full SQL text is extracted
+6. **Windows User Detection**: `client_user` is obtained via `WTSGetActiveConsoleSessionId` → `WTSQuerySessionInformation`, falling back to explorer.exe owner token lookup, then `Environment.UserName`
+7. **Logging**: SQL records are written to a JSON-lines file; after a configurable idle period (default 10 min), buffered records are uploaded to `han_sql_audit_log` in Oracle, then the local file is cleared
+8. **Bypass Prevention**: On startup, the proxy scans running processes for known Oracle clients and adds Windows Firewall block rules targeting their full executable paths. A periodic re-scan (every 30s) catches newly started processes. When the proxy stops, these rules are removed (unless `PersistFirewallRules: true`).
+
+---
+
+## Firewall Rule Management / 防火墙规则管理
+
+The proxy uses per-process Windows Firewall rules (not a global port block) to prevent Oracle client applications from connecting directly to the database:
+
+- **On startup**: Scans running processes for known clients (plsqldev.exe, sqlplus.exe, sqldeveloper.exe, toad.exe, etc.), adds outbound block rules targeting each executable path
+- **Every 30s**: Re-scans for new client processes and adds rules for any previously unseen executables
+- **On shutdown**: Removes all rules by default (controlled by `PersistFirewallRules`)
+
+This avoids the Windows Firewall limitation where "block" rules always win over "allow" rules.
+
+---
+
+## Development Environment / 开发环境
+
+- **Language:** C# (.NET 10.0-windows)
+- **SDK:** dotnet-sdk-10.0.201
+- **IDE:** Open Code
+- **Debug VM:** Windows 10 Enterprise LTSC 2021 (KVM)
+- **Database:** Oracle
+
+---
+
+## Dependencies / 依赖 (NuGet)
+
+| Package | Version | Purpose |
+|---|---|---|
+| `Microsoft.Extensions.Hosting` | 8.0.0 | DI / BackgroundService |
+| `Microsoft.Extensions.Logging` | 8.0.0 | Logging abstractions |
+| `Microsoft.Extensions.Logging.Console` | 8.0.0 | Console logger |
+| `Oracle.ManagedDataAccess.Core` | 23.5.1 | Oracle data access |
+
+---
+
+## License / 许可证
+
+Apache License 2.0
