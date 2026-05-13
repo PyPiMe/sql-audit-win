@@ -8,6 +8,7 @@ public class AppConfig
     public bool DebugEnabled { get; set; } = true;
     public string LogFilePath { get; set; } = "logs/sql_audit.log";
     public int FlushIntervalMinutes { get; set; } = 10;
+    public bool PersistFirewallRules { get; set; } = false;
     public AuditDbConfig? AuditDb { get; set; }
 }
 

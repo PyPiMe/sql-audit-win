@@ -70,7 +70,7 @@ public class FileLogService
         try
         {
             var json = JsonSerializer.Serialize(record);
-            var line = $"{record.Timestamp:yyyy-MM-dd HH:mm:ss.fff}|{json}";
+            var line = $"{record.Timestamp}|{json}";
             File.AppendAllText(_logFilePath, line + Environment.NewLine);
         }
         catch { }

@@ -16,9 +16,17 @@ if (File.Exists(configPath))
     try
     {
         var json = File.ReadAllText(configPath);
-        config = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip
+        };
+        config = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(json, options) ?? new AppConfig();
     }
-    catch { config = new AppConfig(); }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[WARN] Failed to parse config.json: {ex.Message}");
+        config = new AppConfig();
+    }
 }
 else
 {
@@ -29,10 +37,12 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton<DebugLogService>(sp => new DebugLogService(config.DebugLogPath, config.DebugEnabled));
 builder.Services.AddSingleton<FileLogService>(sp => new FileLogService(config.LogFilePath));
 builder.Services.AddSingleton<DatabaseUploadService>(sp => new DatabaseUploadService(config, sp.GetRequiredService<FileLogService>()));
+builder.Services.AddSingleton<FirewallService>(sp => new FirewallService(config, sp.GetRequiredService<DebugLogService>()));
 builder.Services.AddSingleton<TnsProxyService>(sp => new TnsProxyService(
-    config, 
+    config,
     sp.GetRequiredService<FileLogService>(),
-    sp.GetRequiredService<DebugLogService>()));
+    sp.GetRequiredService<DebugLogService>(),
+    sp.GetRequiredService<FirewallService>()));
 builder.Services.AddHostedService<SqlProxyWindowsService>();
 
 builder.Logging.AddConsole();

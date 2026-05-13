@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using SqlProxy.Models;
 using SqlProxy.Protocol;
 
@@ -12,6 +15,7 @@ public class TnsProxyService
     private readonly int _listenPort;
     private readonly FileLogService _fileLog;
     private readonly DebugLogService _debugLog;
+    private readonly FirewallService _firewall;
     private readonly AppConfig _config;
     private readonly ConcurrentDictionary<string, ClientSession> _sessions = new();
     private CancellationTokenSource? _cts;
@@ -22,17 +26,18 @@ public class TnsProxyService
 
     public DateTime LastActivity => _lastActivity;
 
-    public TnsProxyService(AppConfig config, FileLogService fileLog, DebugLogService debugLog)
+    public TnsProxyService(AppConfig config, FileLogService fileLog, DebugLogService debugLog, FirewallService firewall)
     {
         _listenAddress = config.ListenAddress;
         _listenPort = config.ListenPort;
         _config = config;
         _fileLog = fileLog;
         _debugLog = debugLog;
+        _firewall = firewall;
 
         _sourceIp = GetLocalIpAddress();
         _clientHost = Environment.MachineName;
-        _clientUser = Environment.UserName;
+        _clientUser = GetActiveConsoleUser();
     }
 
     private static string GetLocalIpAddress()
@@ -50,8 +55,108 @@ public class TnsProxyService
         }
     }
 
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool WTSQuerySessionInformation(
+        IntPtr hServer, int sessionId, int infoClass,
+        out IntPtr ppBuffer, out int pBytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr memory);
+
+    [DllImport("kernel32.dll")]
+    private static extern int WTSGetActiveConsoleSessionId();
+
+    private static string GetActiveConsoleUser()
+    {
+        try
+        {
+            int sessionId = WTSGetActiveConsoleSessionId();
+            if (sessionId != -1 && WTSQuerySessionInformation(IntPtr.Zero, sessionId, 5, out IntPtr buffer, out _))
+            {
+                var user = Marshal.PtrToStringUni(buffer) ?? "";
+                WTSFreeMemory(buffer);
+                if (!string.IsNullOrEmpty(user) && !user.EndsWith("$"))
+                    return user;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var explorers = Process.GetProcessesByName("explorer");
+            if (explorers.Length > 0)
+            {
+                var user = GetProcessOwner(explorers[0]);
+                if (!string.IsNullOrEmpty(user))
+                    return user;
+            }
+        }
+        catch { }
+
+        var envUser = Environment.UserName;
+        return envUser.EndsWith("$") ? envUser.TrimEnd('$') : envUser;
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr hProcess, uint desiredAccess, out IntPtr hToken);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool LookupAccountSid(
+        string? systemName, IntPtr sid,
+        StringBuilder name, ref int nameLen,
+        StringBuilder domain, ref int domainLen,
+        out int use);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(
+        IntPtr hToken, int infoClass,
+        IntPtr info, int infoLen, out int retLen);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private const uint TOKEN_QUERY = 0x0008;
+    private const int TokenUser = 1;
+
+    private static string GetProcessOwner(Process proc)
+    {
+        try
+        {
+            if (!OpenProcessToken(proc.Handle, TOKEN_QUERY, out IntPtr hToken))
+                return "";
+
+            int len = 0;
+            GetTokenInformation(hToken, TokenUser, IntPtr.Zero, 0, out len);
+            IntPtr tokenInfo = Marshal.AllocHGlobal(len);
+
+            try
+            {
+                if (!GetTokenInformation(hToken, TokenUser, tokenInfo, len, out _))
+                    return "";
+
+                var sidPtr = Marshal.ReadIntPtr(tokenInfo);
+                var name = new StringBuilder(256);
+                var domain = new StringBuilder(256);
+                int nameLen = name.Capacity;
+                int domainLen = domain.Capacity;
+
+                if (LookupAccountSid(null, sidPtr, name, ref nameLen, domain, ref domainLen, out _))
+                    return name.ToString();
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(tokenInfo);
+                CloseHandle(hToken);
+            }
+        }
+        catch { }
+        return "";
+    }
+
     public async Task StartAsync()
     {
+        _firewall.SetupRules();
+
         _cts = new CancellationTokenSource();
         var listener = new TcpListener(IPAddress.Any, _listenPort);
         listener.Start();
@@ -104,6 +209,16 @@ public class TnsProxyService
             session.Dispose();
         }
         _sessions.Clear();
+
+        if (_config.PersistFirewallRules)
+        {
+            _debugLog.Log("[STOP] PersistFirewallRules=true, keeping firewall rules");
+            Console.WriteLine("[INFO] Firewall rules persisted (PersistFirewallRules=true)");
+        }
+        else
+        {
+            _firewall.RemoveRules();
+        }
     }
 
     private async Task HandleClientAsync(TcpClient client, string endPoint, CancellationToken ct)
@@ -117,6 +232,7 @@ public class TnsProxyService
         byte[]? clientConnectPacket = null;
         byte[]? finalResponseToClient = null;
         int finalResponseLength = 0;
+        var session = new ClientSession();
 
         try
         {
@@ -139,13 +255,10 @@ public class TnsProxyService
 
             _debugLog.Log($"[SESSION:{sessionId}] Backend connected successfully");
 
-            var session = new ClientSession
-            {
-                Client = client,
-                Backend = backend,
-                LastActivity = DateTime.Now,
-                ClientEndPoint = endPoint
-            };
+            session.Client = client;
+            session.Backend = backend;
+            session.LastActivity = DateTime.Now;
+            session.ClientEndPoint = endPoint;
             _sessions[sessionId] = session;
 
             clientStream = client.GetStream();
@@ -214,6 +327,7 @@ public class TnsProxyService
 
                 _debugLog.Log($"[SESSION:{sessionId}] Connected to real node: {redirectInfo.Host}:{redirectInfo.Port}");
 
+                session.Backend = backend;
                 backendStream = backend.GetStream();
 
                 await backendStream.WriteAsync(clientConnectPacket, ct);
@@ -281,35 +395,6 @@ public class TnsProxyService
         }
     }
 
-    private (bool hasRedirect, RedirectInfo? info) FindRedirectInBuffer(byte[] buffer, int length)
-    {
-        int offset = 0;
-        while (offset + 2 <= length)
-        {
-            int pktLen = (buffer[offset] << 8) | buffer[offset + 1];
-            if (pktLen < 8 || offset + pktLen > length)
-            {
-                break;
-            }
-
-            byte pktType = buffer[offset + 4];
-
-            if (pktType == TnsPacketHelper.TNS_TYPE_REDIRECT)
-            {
-                var info = TnsPacketHelper.ParseRedirect(buffer, offset, pktLen);
-                if (info != null)
-                {
-                    return (true, info);
-                }
-            }
-
-            offset += pktLen;
-            if (pktLen == 0) break;
-        }
-
-        return (false, null);
-    }
-
     private async Task ProxyDataAsync(NetworkStream src, NetworkStream dst, bool fromClient, string endPoint, string sessionId, ClientSession session, CancellationToken ct)
     {
         var buffer = new byte[32768];
@@ -327,8 +412,11 @@ public class TnsProxyService
                 _lastActivity = DateTime.Now;
                 session.LastActivity = DateTime.Now;
 
-                if (fromClient && packetCount > 1)
+                if (fromClient)
                 {
+                    if (session.LoginUser == null)
+                        ExtractLoginInfo(buffer, bytesRead, sessionId, session);
+
                     ExtractAndLogSql(buffer, bytesRead, endPoint, session);
                 }
 
@@ -347,6 +435,24 @@ public class TnsProxyService
         }
     }
 
+    private void ExtractLoginInfo(byte[] buffer, int length, string sessionId, ClientSession session)
+    {
+        try
+        {
+            var username = TnsDataParser.ExtractLoginUsername(buffer, length);
+            if (!string.IsNullOrEmpty(username))
+            {
+                session.LoginUser = username;
+                _debugLog.Log($"[SESSION:{sessionId}] Login user detected: {username}");
+                Console.WriteLine($"[LOGIN] User: {username}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _debugLog.Log($"[ERROR] ExtractLoginInfo failed: {ex.Message}");
+        }
+    }
+
     private void ExtractAndLogSql(byte[] buffer, int length, string endPoint, ClientSession session)
     {
         try
@@ -355,13 +461,13 @@ public class TnsProxyService
             if (record != null && !string.IsNullOrWhiteSpace(record.SqlText))
             {
                 record.SourceIp = _sourceIp;
-                record.Username = _config.AuditDb?.Username;
+                record.Username = session.LoginUser ?? _config.AuditDb?.Username;
                 record.ClientHost = _clientHost;
                 record.ClientUser = _clientUser;
                 _fileLog.Log(record);
 
                 _debugLog.Log($"[SQL] [{record.Timestamp}]");
-                _debugLog.Log($"[SQL] SourceIp={_sourceIp}, Username={record.Username}");
+                _debugLog.Log($"[SQL] SourceIp={_sourceIp}, User={record.Username}");
                 _debugLog.Log($"[SQL] ClientHost={_clientHost}, ClientUser={_clientUser}");
                 _debugLog.Log($"[SQL] {record.SqlText}");
                 Console.WriteLine($"[SQL] {record.Timestamp} [{record.Username}] {record.SqlText}");
@@ -378,7 +484,7 @@ public class TnsProxyService
         public TcpClient? Client { get; set; }
         public TcpClient? Backend { get; set; }
         public string? ClientEndPoint { get; set; }
-        public string? Username { get; set; }
+        public string? LoginUser { get; set; }
         public DateTime LastActivity { get; set; }
 
         public void Dispose()

@@ -12,6 +12,7 @@ public class SqlProxyWindowsService : BackgroundService
     private readonly FileLogService _fileLog;
     private readonly DatabaseUploadService _dbUpload;
     private readonly TnsProxyService _proxy;
+    private readonly FirewallService _firewall;
     private Timer? _idleTimer;
 
     public SqlProxyWindowsService(
@@ -19,13 +20,15 @@ public class SqlProxyWindowsService : BackgroundService
         AppConfig config,
         FileLogService fileLog,
         DatabaseUploadService dbUpload,
-        TnsProxyService proxy)
+        TnsProxyService proxy,
+        FirewallService firewall)
     {
         _logger = logger;
         _config = config;
         _fileLog = fileLog;
         _dbUpload = dbUpload;
         _proxy = proxy;
+        _firewall = firewall;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -59,6 +62,8 @@ public class SqlProxyWindowsService : BackgroundService
     {
         try
         {
+            _firewall.ScanAndBlock();
+
             var idle = DateTime.Now - _proxy.LastActivity;
             if (idle.TotalMinutes >= _config.FlushIntervalMinutes)
             {

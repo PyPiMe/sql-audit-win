@@ -35,6 +35,80 @@ public static class TnsDataParser
         }
     }
 
+    public static string? ExtractLoginUsername(byte[] data, int length)
+    {
+        try
+        {
+            var str = Encoding.UTF8.GetString(data, 0, length);
+            str = StripBinaryChars(str);
+
+            int authTermIdx = str.IndexOf("AUTH_TERMINAL", StringComparison.Ordinal);
+            if (authTermIdx > 0)
+            {
+                var prefix = str.Substring(0, authTermIdx).TrimEnd();
+                var match = Regex.Match(prefix, @"([A-Za-z_][A-Za-z0-9_#\$]*)$");
+                if (match.Success)
+                    return match.Groups[1].Value;
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? ExtractTargetDatabase(byte[] data, int length)
+    {
+        try
+        {
+            var str = Encoding.UTF8.GetString(data, 0, length);
+            str = StripBinaryChars(str);
+
+            var svcMatch = Regex.Match(str, @"SERVICE_NAME[=:\s]+([^\s\),]+)", RegexOptions.IgnoreCase);
+            if (svcMatch.Success)
+                return svcMatch.Groups[1].Value.Trim();
+
+            var sidMatch = Regex.Match(str, @"SID[=:\s]+([^\s\),]+)", RegexOptions.IgnoreCase);
+            if (sidMatch.Success)
+                return sidMatch.Groups[1].Value.Trim();
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static string? ExtractConnectString(byte[] data, int length)
+    {
+        try
+        {
+            var str = Encoding.UTF8.GetString(data, 0, length);
+            str = StripBinaryChars(str);
+
+            var hostMatch = Regex.Match(str, @"HOST=([^\)\s]+)", RegexOptions.IgnoreCase);
+            var portMatch = Regex.Match(str, @"PORT=(\d+)", RegexOptions.IgnoreCase);
+            var svcMatch = Regex.Match(str, @"SERVICE_NAME=([^\)\s]+)", RegexOptions.IgnoreCase);
+
+            if (hostMatch.Success)
+            {
+                var host = hostMatch.Groups[1].Value;
+                var port = portMatch.Success ? portMatch.Groups[1].Value : "1521";
+                var svc = svcMatch.Success ? svcMatch.Groups[1].Value : "?";
+                return $"{host}:{port}/{svc}";
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? ExtractSqlFromText(string text)
     {
         foreach (var keyword in SqlKeywords)
@@ -105,7 +179,7 @@ public static class TnsDataParser
         return sql.TrimEnd(')').Trim();
     }
 
-    private static string? ExtractUsername(string text)
+    public static string? ExtractUsername(string text)
     {
         var patterns = new[]
         {
