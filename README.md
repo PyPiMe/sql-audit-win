@@ -146,6 +146,19 @@ Set in the NSSM window:
 net start SqlProxy
 ```
 
+**Service Recovery / 服务自动恢复**
+
+To prevent users from stopping the proxy service (which would disable auditing), configure NSSM to automatically restart it:
+
+```cmd
+nssm set SqlProxy AppExit Default Restart
+nssm set SqlProxy AppThrottle 5000
+```
+
+This ensures that even if someone stops the service via `sc stop`, `net stop`, or kills the process, NSSM will restart it within 5 seconds. No code changes required.
+
+若要防止用户关闭代理服务导致审计失效，配置 NSSM 使其在服务退出后自动重启。无论通过 `sc stop`、`net stop` 还是 `taskkill` 停止服务，NSSM 都会在 5 秒内自动拉起，无需修改任何代码。
+
 ### 4. Client tnsnames.ora / 客户端配置
 
 Configure your Oracle client (e.g. PL/SQL Developer) to connect to the proxy instead of the real database. The `SERVICE_NAME` must match the `ServiceName` in `config.json`.
