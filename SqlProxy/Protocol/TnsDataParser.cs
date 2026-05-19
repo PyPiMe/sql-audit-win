@@ -10,7 +10,8 @@ public static class TnsDataParser
     [
         "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP",
         "EXEC", "EXECUTE", "CALL", "MERGE", "TRUNCATE", "GRANT", "REVOKE",
-        "BEGIN", "DECLARE", "COMMIT", "ROLLBACK", "WITH", "SAVEPOINT"
+        "BEGIN", "DECLARE", "COMMIT", "ROLLBACK", "WITH", "SAVEPOINT",
+        "RENAME", "LOCK", "SET"
     ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
