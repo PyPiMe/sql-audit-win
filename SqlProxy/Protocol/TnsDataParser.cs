@@ -117,35 +117,44 @@ public static class TnsDataParser
     {
         foreach (var keyword in SqlKeywords)
         {
-            var pattern = $@"\b{keyword}\b[\s(].*?(?=\z|;|\)\s*$)";
-            var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
-            if (match.Success)
+            int searchFrom = 0;
+            while (searchFrom < text.Length)
             {
-                var sql = match.Value.Trim();
-                sql = CleanSqlText(sql);
-                if (sql.Length > 10)
-                {
-                    return sql;
-                }
-            }
+                int idx = text.IndexOf(keyword, searchFrom, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) break;
 
-            int idx = text.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                int start = idx;
-                int end = FindSqlEnd(text, start);
-                if (end > start)
+                if (IsWordBoundary(text, idx, keyword.Length))
                 {
-                    var sql = text.Substring(start, end - start).Trim();
-                    sql = CleanSqlText(sql);
-                    if (sql.Length > 10)
+                    int end = FindSqlEnd(text, idx);
+                    if (end > idx)
                     {
-                        return sql;
+                        var sql = text.Substring(idx, end - idx).Trim();
+                        sql = CleanSqlText(sql);
+                        if (sql.Length > 10)
+                            return sql;
                     }
                 }
+
+                searchFrom = idx + keyword.Length;
             }
         }
         return null;
+    }
+
+    private static bool IsWordBoundary(string text, int idx, int keywordLen)
+    {
+        if (idx > 0)
+        {
+            char before = text[idx - 1];
+            if (char.IsLetterOrDigit(before) || before == '_') return false;
+        }
+        int afterIdx = idx + keywordLen;
+        if (afterIdx < text.Length)
+        {
+            char after = text[afterIdx];
+            if (char.IsLetterOrDigit(after) || after == '_') return false;
+        }
+        return true;
     }
 
     private static int FindSqlEnd(string s, int start)
@@ -172,15 +181,7 @@ public static class TnsDataParser
     private static string CleanSqlText(string sql)
     {
         sql = sql.Trim();
-        if (sql.EndsWith(")") && !sql.Contains("SELECT"))
-        {
-            sql = sql[..^1].Trim();
-        }
-        while (sql.EndsWith("NULL)"))
-        {
-            sql = sql[..^5].Trim().TrimEnd('(').TrimEnd(',');
-        }
-        return sql.TrimEnd(')').Trim();
+        return sql;
     }
 
     public static string? ExtractUsername(string text)
