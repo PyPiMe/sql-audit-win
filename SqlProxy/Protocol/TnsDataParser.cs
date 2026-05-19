@@ -7,7 +7,11 @@ namespace SqlProxy.Protocol;
 public static class TnsDataParser
 {
     private static readonly string[] SqlKeywords =
-        ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXEC", "CALL"];
+    [
+        "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP",
+        "EXEC", "EXECUTE", "CALL", "MERGE", "TRUNCATE", "GRANT", "REVOKE",
+        "BEGIN", "DECLARE", "COMMIT", "ROLLBACK", "WITH", "SAVEPOINT"
+    ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
     {
@@ -113,7 +117,7 @@ public static class TnsDataParser
     {
         foreach (var keyword in SqlKeywords)
         {
-            var pattern = $@"\b{keyword}\b\s+.*?(?=\z|;|\)\s*$)";
+            var pattern = $@"\b{keyword}\b[\s(].*?(?=\z|;|\)\s*$)";
             var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase | RegexOptions.Singleline);
             if (match.Success)
             {

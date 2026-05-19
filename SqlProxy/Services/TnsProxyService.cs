@@ -417,7 +417,27 @@ public class TnsProxyService
                     if (session.LoginUser == null)
                         ExtractLoginInfo(buffer, bytesRead, sessionId, session);
 
-                    ExtractAndLogSql(buffer, bytesRead, endPoint, session);
+                    var moreData = IsMoreDataFlag(buffer, bytesRead);
+
+                    if (moreData)
+                    {
+                        var payload = ExtractTnsPayload(buffer, bytesRead);
+                        if (payload != null)
+                            session.SqlFragmentBuffer.AddRange(payload);
+                    }
+                    else
+                    {
+                        var payload = ExtractTnsPayload(buffer, bytesRead);
+                        if (payload != null)
+                            session.SqlFragmentBuffer.AddRange(payload);
+
+                        if (session.SqlFragmentBuffer.Count > 0)
+                        {
+                            var fullData = session.SqlFragmentBuffer.ToArray();
+                            ExtractAndLogSql(fullData, fullData.Length, endPoint, session);
+                            session.SqlFragmentBuffer.Clear();
+                        }
+                    }
                 }
 
                 await dst.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
@@ -429,10 +449,31 @@ public class TnsProxyService
             }
         }
         catch { }
-        finally
+
+        if (fromClient && session.SqlFragmentBuffer.Count > 0)
         {
-            _debugLog.Log($"[SESSION:{sessionId}] {direction}: ended ({packetCount} packets)");
+            var fullData = session.SqlFragmentBuffer.ToArray();
+            ExtractAndLogSql(fullData, fullData.Length, endPoint, session);
+            session.SqlFragmentBuffer.Clear();
         }
+
+        _debugLog.Log($"[SESSION:{sessionId}] {direction}: ended ({packetCount} packets)");
+    }
+
+    private static bool IsMoreDataFlag(byte[] data, int length)
+    {
+        if (length < 10 || data[4] != TnsPacketHelper.TNS_TYPE_DATA) return false;
+        return ((data[8] << 8 | data[9]) & 0x0040) != 0;
+    }
+
+    private static byte[]? ExtractTnsPayload(byte[] data, int length)
+    {
+        if (length < 10 || data[4] != TnsPacketHelper.TNS_TYPE_DATA) return null;
+        var payloadLen = length - 10;
+        if (payloadLen <= 0) return null;
+        var payload = new byte[payloadLen];
+        Buffer.BlockCopy(data, 10, payload, 0, payloadLen);
+        return payload;
     }
 
     private void ExtractLoginInfo(byte[] buffer, int length, string sessionId, ClientSession session)
@@ -486,6 +527,7 @@ public class TnsProxyService
         public string? ClientEndPoint { get; set; }
         public string? LoginUser { get; set; }
         public DateTime LastActivity { get; set; }
+        public List<byte> SqlFragmentBuffer { get; } = [];
 
         public void Dispose()
         {
