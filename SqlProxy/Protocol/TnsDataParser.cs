@@ -182,6 +182,63 @@ public static class TnsDataParser
     private static string CleanSqlText(string sql)
     {
         sql = sql.Trim();
+
+        sql = RemoveEmbeddedArtifactAt(sql);
+        sql = TrimTrailingTnsArtifacts(sql);
+
+        return sql;
+    }
+
+    private static string RemoveEmbeddedArtifactAt(string sql)
+    {
+        var sb = new StringBuilder(sql.Length);
+        for (int i = 0; i < sql.Length; i++)
+        {
+            if (sql[i] == '@' && i > 0 && i < sql.Length - 1)
+            {
+                char prev = sql[i - 1];
+                char next = sql[i + 1];
+                bool prevWord = char.IsLetterOrDigit(prev) || prev == '_' || prev == '#';
+                bool nextWord = char.IsLetterOrDigit(next) || next == '_' || next == '#';
+                if (prevWord && nextWord)
+                    continue;
+            }
+            sb.Append(sql[i]);
+        }
+        return sb.ToString();
+    }
+
+    private static string TrimTrailingTnsArtifacts(string sql)
+    {
+        int bestCut = sql.Length;
+
+        for (int i = 0; i < sql.Length - 3; i++)
+        {
+            if ((sql[i] == '@' && sql[i + 1] == 'T') ||
+                (sql[i] == '@' && sql[i + 1] == '@'))
+            {
+                int repeatCount = 1;
+                int step = (sql[i] == '@' && sql[i + 1] == 'T') ? 2 : 2;
+                int j = i + step;
+                while (j + 1 < sql.Length &&
+                       sql[j] == sql[i] &&
+                       sql[j + 1] == sql[i + 1])
+                {
+                    repeatCount++;
+                    j += step;
+                }
+
+                if (repeatCount >= 3)
+                {
+                    bestCut = Math.Min(bestCut, i);
+                    break;
+                }
+            }
+        }
+
+        if (bestCut < sql.Length)
+            sql = sql.Substring(0, bestCut).TrimEnd();
+
         return sql;
     }
 
