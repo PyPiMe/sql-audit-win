@@ -185,6 +185,7 @@ public static class TnsDataParser
 
         sql = RemoveEmbeddedArtifactAt(sql);
         sql = TrimTrailingTnsArtifacts(sql);
+        sql = sql.TrimEnd('@', '?').Trim();
 
         return sql;
     }
@@ -194,7 +195,8 @@ public static class TnsDataParser
         var sb = new StringBuilder(sql.Length);
         for (int i = 0; i < sql.Length; i++)
         {
-            if (sql[i] == '@' && i > 0 && i < sql.Length - 1)
+            char c = sql[i];
+            if ((c == '@' || c == '?') && i > 0 && i < sql.Length - 1)
             {
                 char prev = sql[i - 1];
                 char next = sql[i + 1];
@@ -203,7 +205,7 @@ public static class TnsDataParser
                 if (prevWord && nextWord)
                     continue;
             }
-            sb.Append(sql[i]);
+            sb.Append(c);
         }
         return sb.ToString();
     }
