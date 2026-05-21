@@ -211,14 +211,23 @@ public static class TnsDataParser
         for (int i = 0; i < sql.Length; i++)
         {
             char c = sql[i];
-            if ((c == '@' || c == '?') && i > 0 && i < sql.Length - 1)
+            if (i > 0 && i < sql.Length - 1)
             {
                 char prev = sql[i - 1];
                 char next = sql[i + 1];
                 bool prevWord = char.IsLetterOrDigit(prev) || prev == '_' || prev == '#';
                 bool nextWord = char.IsLetterOrDigit(next) || next == '_' || next == '#';
+
                 if (prevWord && nextWord)
-                    continue;
+                {
+                    if (c == '_' || c == '#' || c == '$' || c == '.')
+                    {
+                    }
+                    else if (!char.IsLetterOrDigit(c))
+                    {
+                        continue;
+                    }
+                }
             }
             sb.Append(c);
         }
