@@ -162,6 +162,7 @@ public static class TnsDataParser
     {
         bool inString = false;
         int parenDepth = 0;
+        int beginDepth = 0;
         for (int i = start; i < s.Length; i++)
         {
             char c = s[i];
@@ -173,10 +174,24 @@ public static class TnsDataParser
             {
                 if (c == '(') parenDepth++;
                 else if (c == ')') parenDepth--;
-                else if (c == ';' && parenDepth == 0) return i;
+                else if (c == ';' && parenDepth == 0 && beginDepth == 0) return i;
+
+                if (MatchesKeywordAt(s, i, "BEGIN"))
+                    beginDepth++;
+                else if (MatchesKeywordAt(s, i, "END") && beginDepth > 0)
+                    beginDepth--;
+                else if (MatchesKeywordAt(s, i, "LOOP"))
+                    beginDepth++;
             }
         }
         return s.Length;
+    }
+
+    private static bool MatchesKeywordAt(string s, int idx, string keyword)
+    {
+        if (idx + keyword.Length > s.Length) return false;
+        if (string.Compare(s, idx, keyword, 0, keyword.Length, StringComparison.OrdinalIgnoreCase) != 0) return false;
+        return IsWordBoundary(s, idx, keyword.Length);
     }
 
     private static string CleanSqlText(string sql)
