@@ -291,7 +291,30 @@ public class TnsProxyService
                 return;
             }
 
-            _debugLog.LogHex($"[SESSION:{sessionId}] B->C[1]", responseBuffer, Math.Min(responseBytes, 256));
+            var totalResponseBytes = responseBytes;
+
+            var firstPacketType = TnsPacketHelper.GetPacketType(responseBuffer, responseBytes);
+            if (firstPacketType == TnsPacketHelper.TNS_TYPE_REDIRECT)
+            {
+                var firstPacketLen = TnsPacketHelper.GetPacketLength(responseBuffer, responseBytes);
+                while (totalResponseBytes < firstPacketLen)
+                {
+                    var more = await backendStream.ReadAsync(responseBuffer.AsMemory(totalResponseBytes), ct);
+                    if (more == 0) break;
+                    totalResponseBytes += more;
+                }
+
+                while (totalResponseBytes < 128)
+                {
+                    var more = await backendStream.ReadAsync(responseBuffer.AsMemory(totalResponseBytes), ct);
+                    if (more == 0) break;
+                    totalResponseBytes += more;
+                }
+            }
+
+            _debugLog.LogHex($"[SESSION:{sessionId}] B->C[1]", responseBuffer, Math.Min(totalResponseBytes, 256));
+
+            responseBytes = totalResponseBytes;
 
             RedirectInfo? redirectInfo = null;
 
