@@ -372,17 +372,17 @@ public class TnsProxyService
                     return;
                 }
 
-                var firstPacketType = TnsPacketHelper.GetPacketType(responseBuffer, responseBytes);
-                if (firstPacketType != TnsPacketHelper.TNS_TYPE_ACCEPT && 
-                    firstPacketType != TnsPacketHelper.TNS_TYPE_DATA &&
-                    firstPacketType != TnsPacketHelper.TNS_TYPE_RESEND &&
-                    firstPacketType != TnsPacketHelper.TNS_TYPE_MARKER)
+                var redirectPacketType = TnsPacketHelper.GetPacketType(responseBuffer, responseBytes);
+                if (redirectPacketType != TnsPacketHelper.TNS_TYPE_ACCEPT && 
+                    redirectPacketType != TnsPacketHelper.TNS_TYPE_DATA &&
+                    redirectPacketType != TnsPacketHelper.TNS_TYPE_RESEND &&
+                    redirectPacketType != TnsPacketHelper.TNS_TYPE_MARKER)
                 {
-                    _debugLog.Log($"[SESSION:{sessionId}] Unexpected packet type: {firstPacketType}");
+                    _debugLog.Log($"[SESSION:{sessionId}] Unexpected packet type: {redirectPacketType}");
                     return;
                 }
 
-                _debugLog.Log($"[SESSION:{sessionId}] Got response from real node, starting relay (type={firstPacketType})");
+                _debugLog.Log($"[SESSION:{sessionId}] Got response from real node, starting relay (type={redirectPacketType})");
 
                 finalResponseToClient = responseBuffer;
                 finalResponseLength = responseBytes;

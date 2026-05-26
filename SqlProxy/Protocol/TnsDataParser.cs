@@ -220,7 +220,7 @@ public static class TnsDataParser
 
                 if (prevWord && nextWord)
                 {
-                    if (c == '_' || c == '#' || c == '$' || c == '.')
+                    if (c == '_' || c == '#' || c == '$' || c == '.' || c == ' ')
                     {
                     }
                     else if (!char.IsLetterOrDigit(c))
@@ -291,12 +291,36 @@ public static class TnsDataParser
     private static string StripBinaryChars(string s)
     {
         var sb = new StringBuilder();
-        foreach (char c in s)
+        for (int i = 0; i < s.Length; i++)
         {
+            char c = s[i];
             if (c >= 32 && c < 127)
                 sb.Append(c);
-            else if (c == '\n' || c == '\r' || c == '\t')
+            else
                 sb.Append(' ');
+        }
+        return NormalizeWhitespace(sb.ToString());
+    }
+
+    private static string NormalizeWhitespace(string s)
+    {
+        var sb = new StringBuilder(s.Length);
+        bool lastWasSpace = false;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == ' ')
+            {
+                if (!lastWasSpace)
+                {
+                    sb.Append(' ');
+                    lastWasSpace = true;
+                }
+            }
+            else
+            {
+                sb.Append(s[i]);
+                lastWasSpace = false;
+            }
         }
         return sb.ToString();
     }
