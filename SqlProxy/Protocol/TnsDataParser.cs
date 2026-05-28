@@ -14,6 +14,20 @@ public static class TnsDataParser
         "RENAME", "LOCK", "SET"
     ];
 
+    private static readonly string[] InternalSqlPatterns =
+    [
+        "sys.dbms_transaction.local_transaction_id",
+        "sys.dbms_session.",
+        "sys.dbms_application_info.set_module",
+        "sys.dbms_application_info.set_action",
+        "sys.dbms_application_info.set_client_info",
+        "sys.dbms_output.",
+        "sys.dbms_alert.",
+        "sys.dbms_pipe.",
+        "sys.dbms_defer.",
+        "sys.dbms_lock.",
+    ];
+
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
     {
         if (length < 10) return null;
@@ -25,6 +39,7 @@ public static class TnsDataParser
 
             var sqlMatch = ExtractSqlFromText(str);
             if (sqlMatch == null) return null;
+            if (IsInternalOracleCall(sqlMatch)) return null;
 
             var record = new SqlAuditRecord
             {
@@ -140,6 +155,16 @@ public static class TnsDataParser
             }
         }
         return null;
+    }
+
+    private static bool IsInternalOracleCall(string sql)
+    {
+        foreach (var pattern in InternalSqlPatterns)
+        {
+            if (sql.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private static bool IsWordBoundary(string text, int idx, int keywordLen)

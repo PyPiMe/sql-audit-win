@@ -9,6 +9,7 @@ public class FirewallService
     private readonly string _blockIp;
     private readonly int _oraclePort;
     private readonly DebugLogService _debugLog;
+    private readonly HashSet<string> _blockedPaths = new(StringComparer.OrdinalIgnoreCase);
     private const string RulePrefix = "SqlProxy_Block_";
 
     private static readonly string[] KnownOracleClients =
@@ -35,6 +36,7 @@ public class FirewallService
 
         try
         {
+            _blockedPaths.Clear();
             DeleteExistingRules();
             var blocked = BlockKnownClients();
 
@@ -71,6 +73,8 @@ public class FirewallService
         var found = FindClientExes();
         foreach (var path in found)
         {
+            if (!_blockedPaths.Add(path)) continue;
+
             var exeName = Path.GetFileNameWithoutExtension(path);
             var ruleName = $"{RulePrefix}{exeName}";
             RunNetsh($"advfirewall firewall delete rule name=\"{ruleName}\"");
