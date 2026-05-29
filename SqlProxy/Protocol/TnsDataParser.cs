@@ -18,14 +18,67 @@ public static class TnsDataParser
     [
         "sys.dbms_transaction.local_transaction_id",
         "sys.dbms_session.",
-        "sys.dbms_application_info.set_module",
-        "sys.dbms_application_info.set_action",
-        "sys.dbms_application_info.set_client_info",
+        "sys.dbms_application_info.",
         "sys.dbms_output.",
         "sys.dbms_alert.",
         "sys.dbms_pipe.",
         "sys.dbms_defer.",
         "sys.dbms_lock.",
+        "sys.dbms_metadata.",
+        "sys.dbms_describe.",
+        "sys.dbms_preprocessor.",
+        "sys.dbms_standard.",
+        "sys.dbms_registry.",
+        "sys.all_mviews",
+        "sys.all_objects",
+        "sys.all_tables",
+        "sys.all_views",
+        "sys.all_tab_columns",
+        "sys.all_tab_comments",
+        "sys.all_col_comments",
+        "sys.all_indexes",
+        "sys.all_ind_columns",
+        "sys.all_ind_expressions",
+        "sys.all_ind_partitions",
+        "sys.all_constraints",
+        "sys.all_cons_columns",
+        "sys.all_sequences",
+        "sys.all_synonyms",
+        "sys.all_procedures",
+        "sys.all_arguments",
+        "sys.all_triggers",
+        "sys.all_source",
+        "sys.all_types",
+        "sys.all_type_attrs",
+        "sys.all_type_methods",
+        "sys.all_part_tables",
+        "sys.all_tab_partitions",
+        "sys.all_part_key_columns",
+        "sys.all_tab_privs",
+        "sys.all_tab_privs_made",
+        "sys.all_col_privs",
+        "sys.all_db_links",
+        "sys.all_users",
+        "sys.all_catalog",
+        "sys.all_directories",
+        "sys.all_java_classes",
+        "sys.all_policies",
+        "sys.all_scheduler_jobs",
+        "sys.v$session",
+        "sys.v$transaction",
+        "sys.v$instance",
+        "sys.v$parameter",
+        "sys.v$nls_parameters",
+        "sys.v$open_cursor",
+        "sys.v$mystat",
+        "sys.v$version",
+        "sys.v$database",
+        "sys.v$sql",
+        "sys.v$lock",
+        "sys.v$access",
+        "sys.v$enabledprivs",
+        "sys_context(",
+        "alter session set",
     ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
@@ -40,6 +93,7 @@ public static class TnsDataParser
             var sqlMatch = ExtractSqlFromText(str);
             if (sqlMatch == null) return null;
             if (IsInternalOracleCall(sqlMatch)) return null;
+            if (IsContaminatedSql(sqlMatch)) return null;
 
             var record = new SqlAuditRecord
             {
@@ -167,6 +221,25 @@ public static class TnsDataParser
         return false;
     }
 
+    private static bool IsContaminatedSql(string sql)
+    {
+        int maxRun = 0;
+        int currentRun = 0;
+        foreach (char c in sql)
+        {
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+            {
+                currentRun++;
+                if (currentRun > maxRun) maxRun = currentRun;
+            }
+            else
+            {
+                currentRun = 0;
+            }
+        }
+        return maxRun >= 20;
+    }
+
     private static bool IsWordBoundary(string text, int idx, int keywordLen)
     {
         if (idx > 0)
@@ -240,8 +313,8 @@ public static class TnsDataParser
             {
                 char prev = sql[i - 1];
                 char next = sql[i + 1];
-                bool prevWord = char.IsLetterOrDigit(prev) || prev == '_' || prev == '#';
-                bool nextWord = char.IsLetterOrDigit(next) || next == '_' || next == '#';
+                bool prevWord = char.IsLetterOrDigit(prev) || prev == '_' || prev == '#' || prev == '$' || prev == '.';
+                bool nextWord = char.IsLetterOrDigit(next) || next == '_' || next == '#' || next == '$' || next == '.';
 
                 if (prevWord && nextWord)
                 {
@@ -253,6 +326,16 @@ public static class TnsDataParser
                         continue;
                     }
                 }
+                else if (c == '@' && (prevWord || nextWord ||
+                    prev == '=' || next == '=' ||
+                    prev == ' ' || next == ' ' ||
+                    prev == '(' || next == '(' ||
+                    prev == ')' || next == ')' ||
+                    prev == ',' || next == ',' ||
+                    prev == ';' || next == ';'))
+                {
+                    continue;
+                }
             }
             sb.Append(c);
         }
@@ -263,27 +346,41 @@ public static class TnsDataParser
     {
         int bestCut = sql.Length;
 
-        for (int i = 0; i < sql.Length - 3; i++)
+        for (int i = 0; i < sql.Length - 2; i++)
         {
-            if ((sql[i] == '@' && sql[i + 1] == 'T') ||
-                (sql[i] == '@' && sql[i + 1] == '@'))
-            {
-                int repeatCount = 1;
-                int step = (sql[i] == '@' && sql[i + 1] == 'T') ? 2 : 2;
-                int j = i + step;
-                while (j + 1 < sql.Length &&
-                       sql[j] == sql[i] &&
-                       sql[j + 1] == sql[i + 1])
-                {
-                    repeatCount++;
-                    j += step;
-                }
+            bool isAtT = sql[i] == '@' && sql[i + 1] == 'T';
+            bool isAtAt = sql[i] == '@' && sql[i + 1] == '@';
+            bool isAtSpaceT = i + 2 < sql.Length && sql[i] == '@' && sql[i + 1] == ' ' && sql[i + 2] == 'T';
+            bool isAtSpaceAt = i + 2 < sql.Length && sql[i] == '@' && sql[i + 1] == ' ' && sql[i + 2] == '@';
 
-                if (repeatCount >= 3)
+            if (!isAtT && !isAtAt && !isAtSpaceT && !isAtSpaceAt) continue;
+
+            int step = isAtSpaceT || isAtSpaceAt ? 3 : 2;
+            int minRepeats = isAtSpaceT || isAtSpaceAt ? 2 : 3;
+            char marker = isAtT || isAtSpaceT ? 'T' : '@';
+
+            int repeatCount = 1;
+            int j = i + step;
+            while (true)
+            {
+                if (step == 3)
                 {
-                    bestCut = Math.Min(bestCut, i);
-                    break;
+                    if (j + 2 < sql.Length && sql[j] == '@' && sql[j + 1] == ' ' && sql[j + 2] == marker)
+                    { repeatCount++; j += step; }
+                    else break;
                 }
+                else
+                {
+                    if (j + 1 < sql.Length && sql[j] == '@' && sql[j + 1] == marker)
+                    { repeatCount++; j += step; }
+                    else break;
+                }
+            }
+
+            if (repeatCount >= minRepeats)
+            {
+                bestCut = Math.Min(bestCut, i);
+                break;
             }
         }
 
