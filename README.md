@@ -26,7 +26,7 @@
 
 | Feature / 功能 | Description / 描述 |
 |---|---|
-| **SQL Capture / SQL 捕获** | Extracts full SQL text (SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, EXEC, CALL) from TNS protocol stream |
+| **SQL Capture / SQL 捕获** | Extracts full SQL text from TNS stream; filters Oracle driver/IDE internal calls; cleans TNS binary artifacts |
 | **Login User Extraction / 登录用户提取** | Parses TNS OAUTH packets to capture the actual PL/SQL Developer login username (stored in `username` field) |
 | **Windows User Detection / Windows 用户识别** | Uses WTS API + explorer.exe token fallback to get the interactive Windows user even when running as SYSTEM service (stored in `client_user` field) |
 | **Firewall Bypass Prevention / 防火墙绕过拦截** | Auto-creates Windows Firewall outbound rules to block known Oracle clients (plsqldev.exe, sqlplus.exe, etc.) from direct access to Oracle server; periodic re-scan to catch newly started processes |
@@ -185,7 +185,7 @@ Configure your Oracle client (e.g. PL/SQL Developer) to connect to the proxy ins
 2. **SQL Proxy** accepts the connection, connects to the real Oracle database using config credentials
 3. **TNS Handshake** is relayed transparently; RAC SCAN redirects are handled automatically
 4. **Login User Extraction**: The proxy parses the TNS OAUTH authentication packet, extracts the DB username (the value preceding `AUTH_TERMINAL`), and records it in the `username` field
-5. **SQL Capture**: Every client-to-backend data packet is scanned for SQL keywords; full SQL text is extracted
+5. **SQL Capture & Filtering / SQL 捕获与过滤**: Every client-to-backend data packet is scanned for SQL keywords; extracted SQL passes through a three-layer filter chain (see [SQL Filtering & Cleanup](#sql-filtering--cleanup-sql-过滤与清洗))
 6. **Windows User Detection**: `client_user` is obtained via `WTSGetActiveConsoleSessionId` → `WTSQuerySessionInformation`, falling back to explorer.exe owner token lookup, then `Environment.UserName`
 7. **Logging**: SQL records are written to a JSON-lines file; after a configurable idle period (default 10 min), buffered records are uploaded to `han_sql_audit_log` in Oracle, then the local file is cleared
 8. **Bypass Prevention**: On startup, the proxy scans running processes for known Oracle clients and adds Windows Firewall block rules targeting their full executable paths. A periodic re-scan (every 30s) catches newly started processes. When the proxy stops, these rules are removed (unless `PersistFirewallRules: true`).
@@ -197,10 +197,52 @@ Configure your Oracle client (e.g. PL/SQL Developer) to connect to the proxy ins
 The proxy uses per-process Windows Firewall rules (not a global port block) to prevent Oracle client applications from connecting directly to the database:
 
 - **On startup**: Scans running processes for known clients (plsqldev.exe, sqlplus.exe, sqldeveloper.exe, toad.exe, etc.), adds outbound block rules targeting each executable path
-- **Every 30s**: Re-scans for new client processes and adds rules for any previously unseen executables
+- **Every 30s**: Re-scans for new client processes and adds rules for any previously unseen executables (already-blocked processes are skipped to avoid redundant firewall operations and log spam)
 - **On shutdown**: Removes all rules by default (controlled by `PersistFirewallRules`)
 
 This avoids the Windows Firewall limitation where "block" rules always win over "allow" rules.
+
+---
+
+## SQL Filtering & Cleanup / SQL 过滤与清洗
+
+The proxy employs a three-layer defense to ensure only user-written application SQL is recorded in the audit log:
+
+### Layer 1: Internal SQL Pattern Filtering / 内部SQL模式过滤
+
+A hardcoded blocklist of **70+ patterns** covers Oracle driver/IDE internal calls that are never user-written:
+
+| Category / 类别 | Examples / 示例 | Count |
+|---|---|---|
+| DBMS packages | `sys.dbms_transaction.local_transaction_id`, `sys.dbms_session.*`, `sys.dbms_application_info.*`, `sys.dbms_output.*`, `sys.dbms_metadata.*`, `sys.dbms_describe.*` | 11 |
+| IDE object browser queries | `sys.all_tables`, `sys.all_views`, `sys.all_tab_columns`, `sys.all_indexes`, `sys.all_constraints`, `sys.all_procedures`, `sys.all_source`, `sys.all_types`, `sys.all_mviews`, etc. | 28 |
+| V$ dynamic views | `sys.v$session`, `sys.v$transaction`, `sys.v$instance`, `sys.v$parameter`, `sys.v$open_cursor`, `sys.v$sql`, etc. | 11 |
+| Session configuration | `alter session set`, `sys_context(` | 2 |
+
+These are issued by Oracle drivers (ODAC/ODP.NET), connection pools, and IDE tools (PL/SQL Developer, TOAD) for internal housekeeping — they are not user business logic and are silently discarded.
+
+### Layer 2: TTC Contamination Detection / TTC协议污染检测
+
+Oracle's TTC (Two-Task Common) protocol frames are carried within TNS DATA packets. When TTC control bytes happen to fall in the ASCII `A-Z` range, they survive binary stripping and fuse with adjacent column names into long, unbroken uppercase-letter runs:
+
+```
+User SQL:       ... wid , ywwid , xnxqdm , kch , ...
+TTC bytes:               Y      W      Y
+Result:         ... widYWWIDXNXQDMKCH...
+```
+
+The proxy detects this by scanning for the longest continuous sequence of uppercase letters + digits without any separator characters (space, comma, underscore, etc.). If such a run exceeds **20 characters**, the SQL is classified as **TTC-contaminated** and discarded — no amount of string cleanup can reliably recover the original identifiers.
+
+### Layer 3: TNS Artifact Cleanup / TNS二进制残留清洗
+
+Two passes clean residual TNS binary artifacts from the extracted SQL text:
+
+| Pass | Method | Purpose |
+|---|---|---|
+| **Embedded artifact removal** | `RemoveEmbeddedArtifactAt` | Strips `@` characters that are sandwiched between SQL identifiers or structural characters (`=`, `,`, `(`, `)`, `;`, space). e.g. `JH.@PYFADM` → `JH.PYFADM`, `10@;` → `10;` |
+| **Trailing artifact truncation** | `TrimTrailingTnsArtifacts` | Detects repeating `@T`/`@@` patterns (both direct and space-separated) and truncates everything from the first occurrence. e.g. `...select ... from dual @ T @ T ...` → `...select ... from dual` |
+
+> **Note:** Some TTC-level corruption is irrecoverable at the string level (e.g., TTC control bytes overwriting `(` or `=` characters). The proxy's filtering strategy is to **discard contaminated SQL** rather than record malformed text.
 
 ---
 
