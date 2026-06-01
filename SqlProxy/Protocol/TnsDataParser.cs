@@ -34,6 +34,7 @@ public static class TnsDataParser
         "sys.all_tables",
         "sys.all_views",
         "sys.all_tab_columns",
+        "sys.all_tab_cols",
         "sys.all_tab_comments",
         "sys.all_col_comments",
         "sys.all_indexes",
@@ -77,8 +78,25 @@ public static class TnsDataParser
         "sys.v$lock",
         "sys.v$access",
         "sys.v$enabledprivs",
+        "v$session",
+        "v$transaction",
+        "v$instance",
+        "v$parameter",
+        "v$nls_parameters",
+        "v$open_cursor",
+        "v$mystat",
+        "v$version",
+        "v$database",
+        "v$sql",
+        "v$lock",
         "sys_context(",
         "alter session set",
+        "set plsql_code_type",
+        "set plscope_settings",
+        "select 'x' from dual",
+        "select null from dual",
+        "length(chr(2000000000))",
+        "lengthb(nchr(200))",
     ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
@@ -296,8 +314,8 @@ public static class TnsDataParser
     {
         sql = sql.Trim();
 
-        sql = RemoveEmbeddedArtifactAt(sql);
         sql = TrimTrailingTnsArtifacts(sql);
+        sql = RemoveEmbeddedArtifactAt(sql);
         sql = sql.TrimEnd('@', '?').Trim();
 
         return sql;
