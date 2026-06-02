@@ -244,6 +244,29 @@ Two passes clean residual TNS binary artifacts from the extracted SQL text:
 
 > **Note:** Some TTC-level corruption is irrecoverable at the string level (e.g., TTC control bytes overwriting `(` or `=` characters). The proxy's filtering strategy is to **discard contaminated SQL** rather than record malformed text.
 
+### Known Limitations / 已知局限
+
+#### TTC Protocol-Level Character Corruption
+
+Oracle's TTC (Two-Task Common) protocol frames are interleaved with SQL text within TNS DATA packets. When TTC control bytes overwrite SQL structural characters, the resulting text is permanently corrupted:
+
+| Original SQL | Corrupted (recorded) | Lost char |
+|---|---|---|
+| `nvl(a.kcxzdm, '9999')` | `nvla.kcxzdm,'9999')` | `(` |
+| `on a.pyfadm = b.pyfadm` | `on a.pyfadmb.pyfadm` | `=`, `(` |
+| `order by njdm desc, c.pyfamc` | `order by njdm descpyfam c` | `,`, `.` |
+
+This corruption is **not recoverable** at the string-cleanup level because:
+- The TTC protocol is Oracle-proprietary with no official specification
+- Third-party TTC parsers (Wireshark, sqlmap) cover only a subset of protocol versions
+- A production-grade TTC parser would require ongoing maintenance for each Oracle release
+
+The proxy mitigates this by:
+1. **`IsContaminatedSql`** — Discarding SQL with runs of >= 20 contiguous uppercase letters (TTC frame contamination signal)
+2. **`InternalSqlPatterns`** — Filtering known driver/IDE internal calls before they reach the log
+
+If fully pristine SQL recording is required, consider **Oracle Fine-Grained Auditing (DBMS_FGA)** as an alternative to MITM proxying.
+
 ---
 
 ## Development Environment / 开发环境

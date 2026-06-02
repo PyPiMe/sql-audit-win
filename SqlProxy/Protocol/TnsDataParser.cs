@@ -95,8 +95,11 @@ public static class TnsDataParser
         "set plscope_settings",
         "select 'x' from dual",
         "select null from dual",
-        "length(chr(2000000000))",
-        "lengthb(nchr(200))",
+        "length(chr",
+        "lengthb(nchr",
+        "lengthbnchr",
+        "all_synonyms",
+        "dba_synonyms",
     ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
