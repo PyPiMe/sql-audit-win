@@ -100,6 +100,9 @@ public static class TnsDataParser
         "lengthbnchr",
         "all_synonyms",
         "dba_synonyms",
+        "sys.all_queue_tables",
+        "sys.all_external_tables",
+        "PLSQLDEV_SAVEPOINT",
     ];
 
     public static SqlAuditRecord? ExtractSqlInfo(byte[] data, int length, string? sourceIp)
