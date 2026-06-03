@@ -265,7 +265,9 @@ The proxy mitigates this by:
 1. **`IsContaminatedSql`** — Discarding SQL with runs of >= 20 contiguous uppercase letters (TTC frame contamination signal)
 2. **`InternalSqlPatterns`** — Filtering known driver/IDE internal calls before they reach the log
 
-If fully pristine SQL recording is required, consider **Oracle Fine-Grained Auditing (DBMS_FGA)** as an alternative to MITM proxying.
+If fully pristine SQL recording is required, the recommended approach is **OCI API Hook** (intercepting `OCIStmtPrepare` at the client library level, as demonstrated by SQLTracker). This captures SQL before TTC encoding, eliminating all protocol-level corruption and providing bind-variable values. A proof-of-concept ETW-based capture was explored on the `etw-experiment` branch but proved incompatible with Oracle Instant Client (requires full Oracle Client with ETW provider registration).
+
+Implementation of OCI Hook requires a native C++ proxy DLL for `oci.dll` that forwards all OCI calls to the real library while intercepting `OCIStmtPrepare`/`OCIStmtExecute` to capture SQL text and communicate it back to the audit service via named pipe or shared memory.
 
 ---
 
