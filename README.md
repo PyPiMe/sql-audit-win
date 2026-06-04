@@ -1,12 +1,12 @@
-# sql-audit-win
+[English](README-EN.md)
 
-> **SQL Audit for Oracle on Windows via OCI API Hook** — Pure C++. Injects a hook DLL into Oracle client processes and intercepts SQL at the OCI API level. No Oracle client modification, no .NET runtime, zero external dependencies.
+# sql-audit-win
 
 > **纯 C++ OCI API Hook SQL 审计** — 进程注入 + Inline Hook，在 OCI 库层面捕获原始 SQL。无需修改 Oracle 客户端，无 .NET 依赖。
 
 ---
 
-## Architecture / 架构
+## 架构
 
 ```
 ┌─────────────────┐
@@ -34,7 +34,7 @@
 
 ---
 
-## ⚠️ 32-bit vs 64-bit 架构匹配
+## ⚠️ 32 位 / 64 位架构匹配
 
 **注入器和目标进程必须架构一致！** 64 位进程不能注入 32 位 DLL，反之亦然。
 
@@ -42,27 +42,27 @@
 |--------------|---------|---------|
 | PL/SQL Developer | **32 位 (Win32)** | `build_oci_hook.bat release win32` |
 | SQL Developer 64-bit | 64 位 | `build_oci_hook.bat` |
-| SQLPlus (取决于安装版本) | 查看任务管理器标记 | 对应架构 |
+| SQLPlus | 查看任务管理器标记 | 对应架构 |
 
 **查看方式：** 任务管理器 → 详细信息 → 看进程名是否带 `(32 位)` 标记。
 
 ---
 
-## Build / 编译
+## 编译
 
 **前置条件：** Visual Studio 2022 + "使用 C++ 的桌面开发" 工作负载
 
 ```cmd
-build_oci_hook.bat                      # 64-bit Release (默认)
-build_oci_hook.bat release win32        # 32-bit Release
-build_oci_hook.bat debug win32          # 32-bit Debug
+build_oci_hook.bat                      # 64 位 Release（默认）
+build_oci_hook.bat release win32        # 32 位 Release
+build_oci_hook.bat debug win32          # 32 位 Debug
 ```
 
 输出：`Win32\Release\` 或 `x64\Release\`
 
 ---
 
-## Deploy / 部署
+## 部署
 
 只需将 3 个文件复制到同一目录（如 `C:\Tools\SqlProxy\`）：
 
@@ -76,7 +76,7 @@ xcopy SqlProxy\config.json       C:\Tools\SqlProxy\
 
 ---
 
-## Configuration / 配置 (`config.json`)
+## 配置 (`config.json`)
 
 ```json
 {
@@ -106,7 +106,7 @@ xcopy SqlProxy\config.json       C:\Tools\SqlProxy\
 | `StartupLogPath` | 启动诊断日志路径（空字符串禁用） |
 | `AuditDb` | Oracle 审计数据库连接信息 |
 
-### ODBC 驱动配置
+### ODBC 驱动
 
 数据库连接通过 Windows ODBC 实现，需安装 Oracle ODBC 驱动。连接字符串格式：
 
@@ -114,11 +114,11 @@ xcopy SqlProxy\config.json       C:\Tools\SqlProxy\
 Driver={Oracle in OraClient19Home1};Dbq=Host:Port/ServiceName;Uid=User;Pwd=Password;
 ```
 
-如果 ODBC 驱动名称不同（如 `OraClient21Home1`），修改 `db_uploader.cpp` 中 `BuildConnectionString` 函数的驱动名。
+如果 ODBC 驱动名不同，修改 `db_uploader.cpp` 中 `BuildConnectionString` 的驱动名。
 
 ---
 
-## Run / 运行
+## 运行
 
 ```cmd
 C:\Tools\SqlProxy\SqlProxy.exe              # 控制台模式
@@ -142,18 +142,16 @@ NSSM 窗口中设置：
 net start SqlProxy
 ```
 
-**服务自动恢复（关键）：**
+**服务自动恢复：**
 
 ```cmd
 nssm set SqlProxy AppExit Default Restart
 nssm set SqlProxy AppThrottle 5000
 ```
 
-> NSSM 通过直接启动子进程的方式管理服务，不使用 SCM 调度器，因此 `--service` 参数仅用于标识服务模式。
-
 ---
 
-## SQL 过滤规则 / SQL Filtering
+## SQL 过滤规则
 
 `OciHook.dll` 内置 100+ 条过滤规则，命中以下类别的 SQL 不记录：
 
@@ -167,11 +165,11 @@ nssm set SqlProxy AppThrottle 5000
 | 审计表自身 | 1 | `han_sql_audit_log` |
 | 探针查询 | 4 | `select 'x' from dual`, `select user from dual` |
 
-过滤规则位于 `OciHook/oci_hook.cpp` 的 `InternalSqlPatterns` 数组，支持大小写不敏感子串匹配。
+过滤规则位于 `OciHook/oci_hook.cpp` 的 `InternalSqlPatterns` 数组，大小写不敏感子串匹配。
 
 ---
 
-## Database Schema / 数据库表结构
+## 数据库表结构
 
 ```sql
 CREATE TABLE han_sql_audit_log (
@@ -200,9 +198,9 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
 
 ---
 
-## Troubleshooting / 排错
+## 排错
 
-**服务启动后立即退出：** 检查 `StartupLogPath` 配置的诊断日志，确认退出位置。
+**服务启动后立即退出：** 检查 `StartupLogPath` 配置的诊断日志。
 
 **无 SQL 记录：** 用 [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview) 检查：
 1. 管理员运行 → Capture → Capture Global Win32
@@ -211,10 +209,10 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
    - `TIMEOUT` → oci.dll 未加载
    - `Captured` 但无文件记录 → Named Pipe 不通
 
-**ODBC 连接失败：** 确认 Oracle ODBC 驱动已安装（ODBC 数据源管理器查看），驱动名与代码中一致。
+**ODBC 连接失败：** 确认 Oracle ODBC 驱动已安装且驱动名与代码一致。
 
 ---
 
-## License / 许可证
+## 许可证
 
 Apache License 2.0
