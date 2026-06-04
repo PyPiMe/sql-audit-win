@@ -1,11 +1,10 @@
 {
-    "ListenAddress": "127.0.0.1",
-    "ListenPort": 1521,
+    "PipeName": "SqlProxyOciHook",
     "DebugLogPath": "logs/debug.log",
     "DebugEnabled": true,
     "LogFilePath": "logs/sql_audit.log",
-    "FlushIntervalMinutes": 10,
-    "PersistFirewallRules": false,
+    "FlushIntervalMinutes": 2,
+    "StartupLogPath": "logs/startup.log",
     "AuditDb": {
         "Host": "192.168.1.1",
         "Port": 1521,
