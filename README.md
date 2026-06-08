@@ -17,7 +17,7 @@
 │  · 进程扫描      │
 │  · DLL 注入      │──── CreateRemoteThread ──┐
 │  · 文件日志      │                          │
-│  · ODBC 上传    │                          ▼
+│  · OCI 上传     │                          ▼
 └────────┬────────┘    ┌──────────────────────────────┐     ┌──────────────────────┐
          │ Named Pipe  │  OciHook.dll (注入到目标进程)  │     │  Oracle Database     │
          └─────────────│  Inline Hook:                 │────▶│  Server              │
@@ -32,7 +32,7 @@
 3. `CreateRemoteThread` + `LoadLibrary` 注入 `OciHook.dll`
 4. DLL 内轮询线程等待 `oci.dll` 加载后，Inline Hook `OCIStmtPrepare`/`OCIStmtPrepare2`
 5. 拦截到的 SQL 经 100+ 条规则过滤后，通过 Named Pipe 发送回服务
-6. 服务写入 JSON-lines 日志，空闲时通过 ODBC 批量上传至数据库
+6. 服务写入 JSON-lines 日志，空闲时通过 OCI 批量上传至数据库
 
 ---
 
@@ -108,15 +108,9 @@ xcopy SqlProxy\config.json       C:\Tools\SqlProxy\
 | `StartupLogPath` | 启动诊断日志路径（空字符串禁用） |
 | `AuditDb` | Oracle 审计数据库连接信息 |
 
-### ODBC 驱动
+### 数据库连接
 
-数据库连接通过 Windows ODBC 实现，需安装 Oracle ODBC 驱动。连接字符串格式：
-
-```
-Driver={Oracle in OraClient19Home1};Dbq=Host:Port/ServiceName;Uid=User;Pwd=Password;
-```
-
-如果 ODBC 驱动名不同，修改 `db_uploader.cpp` 中 `BuildConnectionString` 的驱动名。
+通过 OCI（动态加载 `oci.dll`）直连 Oracle 数据库，无需 ODBC 驱动或 TNS 配置。`AuditDb.Host` 接受 IP 或完整 TNS 描述符。
 
 ---
 
@@ -193,10 +187,10 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
 | `wid` | 自动生成 GUID |
 | `timestamp` | 捕获时间 `yyyy-MM-dd HH:mm:ss` |
 | `source_ip` | 审计服务所在机器 IP |
-| `username` | 执行 SQL 的 Windows 用户名 |
+| `username` | Oracle 登录用户名（OCI Hook 捕获） |
 | `sql_text` | 完整 SQL 文本 |
 | `client_host` | 机器名 |
-| `client_user` | 交互登录用户（WTS API 检测） |
+| `client_user` | Windows 登录用户名（注入进程内获取） |
 
 ---
 
@@ -211,7 +205,7 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
    - `TIMEOUT` → oci.dll 未加载
    - `Captured` 但无文件记录 → Named Pipe 不通
 
-**ODBC 连接失败：** 确认 Oracle ODBC 驱动已安装且驱动名与代码一致。
+**数据库连接失败：** 检查 `AuditDb` 配置，确认网络可达且凭据正确。
 
 ---
 

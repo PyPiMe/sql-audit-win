@@ -17,7 +17,7 @@
 │  · Process watch│
 │  · DLL injector │──── CreateRemoteThread ──┐
 │  · File log     │                          │
-│  · ODBC upload  │                          ▼
+│  · OCI upload   │                          ▼
 └────────┬────────┘    ┌──────────────────────────────┐     ┌──────────────────────┐
          │ Named Pipe  │  OciHook.dll (injected)       │     │  Oracle Database     │
          └─────────────│  Inline Hook:                 │────▶│  Server              │
@@ -32,7 +32,7 @@
 3. Injects `OciHook.dll` via `CreateRemoteThread` + `LoadLibrary`
 4. A polling thread inside the DLL waits for `oci.dll` to load, then installs inline hooks on `OCIStmtPrepare`/`OCIStmtPrepare2`
 5. Captured SQL passes through 100+ filter rules, then sent back via Named Pipe
-6. The service writes JSON-lines logs and periodically uploads via ODBC
+6. The service writes JSON-lines logs and periodically uploads via OCI
 
 ---
 
@@ -108,15 +108,9 @@ xcopy SqlProxy\config.json       C:\Tools\SqlProxy\
 | `StartupLogPath` | Startup diagnostic log path (empty to disable) |
 | `AuditDb` | Oracle audit database connection info |
 
-### ODBC Driver
+### Database Connection
 
-Database connectivity uses Windows ODBC. An Oracle ODBC driver must be installed. Connection string format:
-
-```
-Driver={Oracle in OraClient19Home1};Dbq=Host:Port/ServiceName;Uid=User;Pwd=Password;
-```
-
-If your ODBC driver name differs, update `BuildConnectionString` in `db_uploader.cpp`.
+Connects directly via OCI (dynamically loaded `oci.dll`). No ODBC driver or TNS configuration required. `AuditDb.Host` accepts an IP address or a full TNS descriptor.
 
 ---
 
@@ -193,10 +187,10 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
 | `wid` | Auto-generated GUID |
 | `timestamp` | Capture time `yyyy-MM-dd HH:mm:ss` |
 | `source_ip` | Audit service machine IP |
-| `username` | Windows username executing the SQL |
+| `username` | Oracle login username (captured by OCI hook) |
 | `sql_text` | Full SQL statement text |
 | `client_host` | Machine name |
-| `client_user` | Interactive console user (WTS API) |
+| `client_user` | Windows login username (from injected process) |
 
 ---
 
@@ -211,7 +205,7 @@ CREATE INDEX idx_audit_user ON han_sql_audit_log(username);
    - `TIMEOUT` → oci.dll not loaded
    - `Captured` but no file output → Named Pipe connection failed
 
-**ODBC connection failure:** Verify Oracle ODBC driver is installed and the driver name matches the code.
+**DB connection failure:** Verify `AuditDb` configuration, network connectivity, and credentials.
 
 ---
 
