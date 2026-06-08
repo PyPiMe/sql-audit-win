@@ -2,7 +2,9 @@
 
 # sql-audit-win
 
-> **纯 C++ OCI API Hook SQL 审计** — 进程注入 + Inline Hook，在 OCI 库层面捕获原始 SQL。无需修改 Oracle 客户端，无 .NET 依赖。
+> **Oracle 数据库专用 SQL 审计工具** — 纯 C++ 实现，通过进程注入 + Inline Hook 在 OCI 库层面捕获 SQL。无需修改 Oracle 客户端，无 .NET 依赖。
+>
+> **仅支持 Oracle 数据库。** 本工具通过 Hook Oracle 专有的 `OCIStmtPrepare`/`OCIStmtPrepare2` API 实现 SQL 拦截，不支持 SQL Server、MySQL、PostgreSQL 等其他数据库。
 
 ---
 

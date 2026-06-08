@@ -7,7 +7,7 @@
 
 class PipeServer {
 public:
-    using MessageHandler = std::function<void(const std::string& username, const std::string& sqlText)>;
+    using MessageHandler = std::function<void(const std::string& oracleUser, const std::string& windowsUser, const std::string& sqlText)>;
 
     PipeServer(const std::string& pipeName, MessageHandler handler);
     ~PipeServer();

@@ -152,12 +152,24 @@ void PipeServer::HandleClient(HANDLE pipe) {
             if (line.empty()) continue;
 
             size_t uStart = line.find("\"u\":\"");
+            size_t wStart = line.find("\"w\":\"");
             size_t sStart = line.find("\"s\":\"");
             if (uStart == std::string::npos || sStart == std::string::npos) continue;
 
             uStart += 5;
             size_t uEnd = line.find('"', uStart);
             if (uEnd == std::string::npos) continue;
+
+            std::string oracleUser = line.substr(uStart, uEnd - uStart);
+
+            std::string windowsUser;
+            if (wStart != std::string::npos) {
+                wStart += 5;
+                size_t wEnd = line.find('"', wStart);
+                if (wEnd != std::string::npos) {
+                    windowsUser = line.substr(wStart, wEnd - wStart);
+                }
+            }
 
             sStart += 5;
             size_t sEnd = line.rfind('"');
@@ -180,10 +192,11 @@ void PipeServer::HandleClient(HANDLE pipe) {
                 }
             };
             unescape(sqlText);
-            unescape(username);
+            unescape(oracleUser);
+            unescape(windowsUser);
 
             if (!sqlText.empty()) {
-                _handler(username, sqlText);
+                _handler(oracleUser, windowsUser, sqlText);
             }
         }
     }

@@ -56,22 +56,22 @@ static std::string TimestampNow() {
     return buf;
 }
 
-static void OnSqlMessage(const std::string& username, const std::string& sqlText) {
+static void OnSqlMessage(const std::string& oracleUser, const std::string& windowsUser, const std::string& sqlText) {
     g_lastActivity = time(nullptr);
     SqlAuditRecord record;
     record.Wid = GuidGen();
     record.Timestamp = TimestampNow();
     record.SourceIp = g_sourceIp;
-    record.Username = username;
+    record.Username = oracleUser;
     record.SqlText = sqlText;
     record.ClientHost = g_clientHost;
-    record.ClientUser = g_clientUser;
+    record.ClientUser = windowsUser.empty() ? g_clientUser : windowsUser;
     g_fileLogger->Log(record);
     g_debugLogger->Log("[SQL] [" + record.Timestamp + "]");
-    g_debugLogger->Log("[SQL] SourceIp=" + g_sourceIp + ", User=" + username);
-    g_debugLogger->Log("[SQL] ClientHost=" + g_clientHost + ", ClientUser=" + g_clientUser);
+    g_debugLogger->Log("[SQL] SourceIp=" + g_sourceIp + ", OracleUser=" + oracleUser + ", WinUser=" + record.ClientUser);
+    g_debugLogger->Log("[SQL] ClientHost=" + g_clientHost + ", ClientUser=" + record.ClientUser);
     g_debugLogger->Log("[SQL] " + sqlText);
-    printf("[SQL] %s [%s] %s\n", record.Timestamp.c_str(), username.c_str(), sqlText.c_str());
+    printf("[SQL] %s [%s] %s\n", record.Timestamp.c_str(), oracleUser.c_str(), sqlText.c_str());
 }
 
 static void InjectorLoop() {
@@ -90,9 +90,13 @@ static void FlushLoop() {
             auto records = g_fileLogger->GetBufferedRecords();
             if (!records.empty()) {
                 g_debugLogger->Log("[IDLE] Flushing " + std::to_string(records.size()) + " records...");
-                g_dbUploader->Upload(records);
-                g_fileLogger->ClearBuffer();
-                g_fileLogger->ClearFile();
+                int uploaded = g_dbUploader->Upload(records);
+                if (uploaded > 0) {
+                    g_fileLogger->ClearBuffer();
+                    g_fileLogger->ClearFile();
+                } else {
+                    g_debugLogger->Log("[IDLE] Upload failed, retaining " + std::to_string(records.size()) + " records");
+                }
             }
         }
     }
@@ -105,8 +109,10 @@ static int RunApplication() {
 
     g_debugLogger = std::make_unique<DebugLogger>(g_config.DebugLogPath, g_config.DebugEnabled);
     g_fileLogger = std::make_unique<FileLogger>(g_config.LogFilePath);
+    g_fileLogger->LoadFromFile();
     DiagLog("file logger created");
-    g_dbUploader = std::make_unique<DbUploader>(g_config.AuditDb);
+    g_dbUploader = std::make_unique<DbUploader>(g_config.AuditDb,
+        [](const std::string& msg) { g_debugLogger->Log(msg); });
     DiagLog("db uploader created");
     g_sourceIp = GetLocalIpAddress();
 

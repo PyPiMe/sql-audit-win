@@ -16,6 +16,7 @@ struct SqlAuditRecord {
 class FileLogger {
 public:
     FileLogger(const std::string& logPath);
+    void LoadFromFile();
     void Log(const SqlAuditRecord& record);
     std::vector<SqlAuditRecord> GetBufferedRecords();
     void ClearBuffer();

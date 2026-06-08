@@ -7,7 +7,7 @@ public:
     static NamedPipeClient& Get();
 
     void Initialize(const std::string& pipeName);
-    void SendSqlMessage(const std::string& username, const std::string& sqlText);
+    void SendSqlMessage(const std::string& oracleUser, const std::string& windowsUser, const std::string& sqlText);
     void Shutdown();
 
 private:

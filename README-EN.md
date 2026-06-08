@@ -2,7 +2,9 @@
 
 # sql-audit-win
 
-> **SQL Audit for Oracle on Windows via OCI API Hook** — Pure C++. Process injection + inline hook captures pristine SQL at the OCI library level. No Oracle client modification, no .NET runtime, zero external dependencies.
+> **Oracle Database SQL Audit Tool** — Pure C++. Captures SQL at the OCI library level via process injection + inline hook. No Oracle client modification, no .NET runtime.
+>
+> **Oracle only.** This tool hooks Oracle's proprietary `OCIStmtPrepare`/`OCIStmtPrepare2` API. SQL Server, MySQL, PostgreSQL, and other databases are not supported.
 
 ---
 

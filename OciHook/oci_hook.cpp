@@ -17,8 +17,9 @@ struct HookInfo {
 };
 
 static HMODULE g_ociModule = nullptr;
-static HookInfo g_hooks[3];
+static HookInfo g_hooks[4];
 static CRITICAL_SECTION g_hookCs;
+static char g_oracleUser[128] = {};
 
 extern "C" __declspec(dllexport) sword __cdecl Hook_OCIStmtPrepare(
     dvoid* stmtp, dvoid* errhp, oratext* stmt, ub4 stmt_len, ub4 language, ub4 mode);
@@ -28,6 +29,8 @@ extern "C" __declspec(dllexport) sword __cdecl Hook_OCIStmtPrepare2(
 extern "C" __declspec(dllexport) sword __cdecl Hook_OCIStmtExecute(
     dvoid* svchp, dvoid* stmtp, dvoid* errhp, ub4 iters, ub4 rowoff,
     void* snap_in, void* snap_out, ub4 mode);
+extern "C" __declspec(dllexport) sword __cdecl Hook_OCIAttrSet(
+    dvoid* trgthndlp, ub4 trghndltyp, dvoid* attributep, ub4 size, ub4 attrtype, dvoid* errhp);
 
 static bool IsInternalSql(const std::string& sql);
 
@@ -67,10 +70,12 @@ bool InstallHooks() {
     void* prepare   = GetProcAddress(g_ociModule, "OCIStmtPrepare");
     void* prepare2  = GetProcAddress(g_ociModule, "OCIStmtPrepare2");
     void* execute   = GetProcAddress(g_ociModule, "OCIStmtExecute");
+    void* attrset   = GetProcAddress(g_ociModule, "OCIAttrSet");
 
     g_hooks[0] = { prepare,   (void*)Hook_OCIStmtPrepare,  {}, false };
     g_hooks[1] = { prepare2,  (void*)Hook_OCIStmtPrepare2, {}, false };
     g_hooks[2] = { execute,   (void*)Hook_OCIStmtExecute,  {}, false };
+    g_hooks[3] = { attrset,   (void*)Hook_OCIAttrSet,      {}, false };
 
     bool any = false;
     for (auto& h : g_hooks) {
@@ -118,12 +123,45 @@ static void SendSqlToPipe(const char* stmt, uint32_t stmt_len) {
         return;
     }
 
-    char userBuf[256] = {};
-    DWORD sz = sizeof(userBuf);
-    GetUserNameA(userBuf, &sz);
+    static std::string s_lastSql;
+    static CRITICAL_SECTION s_dedupCs;
+    static bool s_dedupInit = false;
+    if (!s_dedupInit) {
+        InitializeCriticalSection(&s_dedupCs);
+        s_dedupInit = true;
+    }
+
+    {
+        EnterCriticalSection(&s_dedupCs);
+        bool dup = false;
+        if (sql.size() == s_lastSql.size()) {
+            dup = true;
+            for (size_t i = 0; i < sql.size(); i++) {
+                if (toupper((unsigned char)sql[i]) != toupper((unsigned char)s_lastSql[i])) {
+                    dup = false;
+                    break;
+                }
+            }
+        }
+        s_lastSql = sql;
+        LeaveCriticalSection(&s_dedupCs);
+        if (dup) return;
+    }
+
+    char oracleUser[128] = {};
+    if (g_oracleUser[0]) {
+        strcpy(oracleUser, g_oracleUser);
+    } else {
+        DWORD sz = sizeof(oracleUser);
+        GetUserNameA(oracleUser, &sz);
+    }
+
+    char winUser[128] = {};
+    DWORD sz = sizeof(winUser);
+    GetUserNameA(winUser, &sz);
 
     OutputDebugStringA(("[OciHook] Captured: " + sql.substr(0, 200) + "\n").c_str());
-    NamedPipeClient::Get().SendSqlMessage(userBuf, sql);
+    NamedPipeClient::Get().SendSqlMessage(oracleUser, winUser, sql);
 }
 
 extern "C" __declspec(dllexport) sword __cdecl Hook_OCIStmtPrepare(
@@ -167,6 +205,29 @@ extern "C" __declspec(dllexport) sword __cdecl Hook_OCIStmtExecute(
     RestoreOriginal(g_hooks[2]);
     sword ret = real(svchp, stmtp, errhp, iters, rowoff, snap_in, snap_out, mode);
     PatchJmp(g_hooks[2]);
+    LeaveCriticalSection(&g_hookCs);
+    return ret;
+}
+
+#define OCI_ATTR_USERNAME 22
+
+extern "C" __declspec(dllexport) sword __cdecl Hook_OCIAttrSet(
+    dvoid* trgthndlp, ub4 trghndltyp, dvoid* attributep, ub4 size, ub4 attrtype, dvoid* errhp) {
+    if (attrtype == OCI_ATTR_USERNAME && attributep && size > 0 && size < sizeof(g_oracleUser)) {
+        memcpy(g_oracleUser, attributep, size);
+        g_oracleUser[size] = '\0';
+        OutputDebugStringA("[OciHook] Oracle user: ");
+        OutputDebugStringA(g_oracleUser);
+        OutputDebugStringA("\n");
+    }
+
+    typedef sword(__cdecl *Func)(dvoid*, ub4, dvoid*, ub4, ub4, dvoid*);
+    Func real = (Func)g_hooks[3].targetFunc;
+
+    EnterCriticalSection(&g_hookCs);
+    RestoreOriginal(g_hooks[3]);
+    sword ret = real(trgthndlp, trghndltyp, attributep, size, attrtype, errhp);
+    PatchJmp(g_hooks[3]);
     LeaveCriticalSection(&g_hookCs);
     return ret;
 }
@@ -273,10 +334,12 @@ static bool IsInternalSql(const std::string& sql) {
     std::string upper;
     upper.reserve(sql.size());
     for (char c : sql) upper += (char)toupper((unsigned char)c);
+
     for (const auto* pattern : InternalSqlPatterns) {
         std::string patUpper;
         for (const char* p = pattern; *p; p++)
             patUpper += (char)toupper((unsigned char)*p);
+
         if (upper.find(patUpper) != std::string::npos)
             return true;
     }

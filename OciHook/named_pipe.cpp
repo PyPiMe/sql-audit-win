@@ -12,7 +12,7 @@ void NamedPipeClient::Initialize(const std::string& pipeName) {
     InitializeCriticalSection(&_cs);
 }
 
-void NamedPipeClient::SendSqlMessage(const std::string& username, const std::string& sqlText) {
+void NamedPipeClient::SendSqlMessage(const std::string& oracleUser, const std::string& windowsUser, const std::string& sqlText) {
     std::string escapedSql = sqlText;
     for (size_t i = 0; i < escapedSql.size(); ++i) {
         if (escapedSql[i] == '\\') { escapedSql.insert(i, "\\"); i++; }
@@ -22,14 +22,21 @@ void NamedPipeClient::SendSqlMessage(const std::string& username, const std::str
         else if (escapedSql[i] < 32) { escapedSql.replace(i, 1, " "); }
     }
 
-    std::string escapedUser = username;
+    std::string escapedUser = oracleUser;
     for (size_t i = 0; i < escapedUser.size(); ++i) {
         if (escapedUser[i] == '\\') { escapedUser.insert(i, "\\"); i++; }
         else if (escapedUser[i] == '"') { escapedUser.insert(i, "\\"); i++; }
         else if (escapedUser[i] < 32) { escapedUser.replace(i, 1, " "); }
     }
 
-    std::string msg = "{\"u\":\"" + escapedUser + "\",\"s\":\"" + escapedSql + "\"}\n";
+    std::string escapedWinUser = windowsUser;
+    for (size_t i = 0; i < escapedWinUser.size(); ++i) {
+        if (escapedWinUser[i] == '\\') { escapedWinUser.insert(i, "\\"); i++; }
+        else if (escapedWinUser[i] == '"') { escapedWinUser.insert(i, "\\"); i++; }
+        else if (escapedWinUser[i] < 32) { escapedWinUser.replace(i, 1, " "); }
+    }
+
+    std::string msg = "{\"u\":\"" + escapedUser + "\",\"w\":\"" + escapedWinUser + "\",\"s\":\"" + escapedSql + "\"}\n";
     WriteMessage(msg);
 }
 

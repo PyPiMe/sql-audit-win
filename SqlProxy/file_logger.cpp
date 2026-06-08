@@ -86,3 +86,57 @@ void FileLogger::ClearFile() {
     std::lock_guard<std::mutex> lock(_mutex);
     std::ofstream f(_logPath, std::ios::trunc);
 }
+
+void FileLogger::LoadFromFile() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _buffer.clear();
+
+    std::ifstream f(_logPath);
+    if (!f) return;
+
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty()) continue;
+
+        size_t sep = line.find('|');
+        if (sep == std::string::npos) continue;
+        std::string json = line.substr(sep + 1);
+
+        SqlAuditRecord r;
+
+        auto extract = [&](const char* key) -> std::string {
+            std::string skey = "\"" + std::string(key) + "\":\"";
+            size_t start = json.find(skey);
+            if (start == std::string::npos) return "";
+            start += skey.size();
+            size_t end = start;
+            while (end < json.size()) {
+                if (json[end] == '"' && (end == 0 || json[end-1] != '\\')) break;
+                end++;
+            }
+            std::string val = json.substr(start, end - start);
+            for (size_t i = 0; i + 1 < val.size(); i++) {
+                if (val[i] == '\\') {
+                    char n = val[i+1];
+                    if (n == '"' || n == '\\' || n == '/') { val.erase(i, 1); }
+                    else if (n == 'n') { val[i] = '\n'; val.erase(i+1, 1); }
+                    else if (n == 'r') { val[i] = '\r'; val.erase(i+1, 1); }
+                    else if (n == 't') { val[i] = '\t'; val.erase(i+1, 1); }
+                }
+            }
+            return val;
+        };
+
+        r.Wid        = extract("wid");
+        r.Timestamp  = extract("timestamp");
+        r.SourceIp   = extract("source_ip");
+        r.Username   = extract("username");
+        r.SqlText    = extract("sql_text");
+        r.ClientHost = extract("client_host");
+        r.ClientUser = extract("client_user");
+
+        if (!r.SqlText.empty()) {
+            _buffer.push_back(r);
+        }
+    }
+}
